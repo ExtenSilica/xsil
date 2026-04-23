@@ -7,3 +7,10 @@ cli/target/
 *.log
 .DS_Store
 Thumbs.db
+
+# CLI dev-only test trees (never ship in public releases)
+cli/check_signed/
+cli/tampered_pkg/
+cli/tampered_manifest_pkg/
+cli/temp_pkg/
+cli/test.tgz
