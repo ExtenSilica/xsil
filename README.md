@@ -10,7 +10,7 @@ The ExtenSilica **registry, website, and hosted API** live in a separate **priva
 
 ## Install
 
-From [GitHub Releases](https://github.com/extensilica/xsil/releases) (tags `cli/v*.*.*`) or:
+From [GitHub Releases](https://github.com/ExtenSilica/xsil/releases) (tags `cli/v*.*.*`) or:
 
 ```bash
 cargo install --path cli
