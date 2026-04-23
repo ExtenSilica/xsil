@@ -1,0 +1,195 @@
+name: CLI Release
+
+# Triggered by pushing a tag of the form cli/v1.2.3
+# Example:
+#   git tag cli/v1.0.0
+#   git push origin cli/v1.0.0
+#
+# Produces static binaries for 5 platforms, packages them, generates
+# SHA-256 checksums, and publishes a GitHub Release with all artifacts.
+
+on:
+  push:
+    tags:
+      - 'cli/v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: xsil
+
+jobs:
+  # ── Cross-compile for all platforms ──────────────────────────────────────────
+  build:
+    name: Build — ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 — fully static musl binary (no glibc dep)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+            ext: ""
+            archive: tar.gz
+
+          # Linux ARM64 — static musl (Raspberry Pi 4/5, AWS Graviton, etc.)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+            ext: ""
+            archive: tar.gz
+
+          # macOS Intel
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            use_cross: false
+            ext: ""
+            archive: tar.gz
+
+          # macOS Apple Silicon (M1/M2/M3)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
+            ext: ""
+            archive: tar.gz
+
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            use_cross: false
+            ext: ".exe"
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # `cross` wraps cargo in a Docker container that has the correct
+      # musl toolchain + statically-linked OpenSSL pre-built, so native-tls
+      # links cleanly without any extra setup.
+      - name: Install cross (Linux musl targets only)
+        if: matrix.use_cross == true
+        run: cargo install cross --locked
+
+      - name: Build (using cross)
+        if: matrix.use_cross == true
+        working-directory: cli
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: matrix.use_cross == false
+        working-directory: cli
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # ── Package ────────────────────────────────────────────────────────────
+
+      - name: Package (tar.gz — Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          BIN="cli/target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
+          ARCHIVE="${{ env.BINARY_NAME }}-${{ matrix.target }}.tar.gz"
+          tar czf "$ARCHIVE" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          echo "ARTIFACT=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Package (zip — Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $bin  = "cli/target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe"
+          $out  = "${{ env.BINARY_NAME }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path $bin -DestinationPath $out
+          "ARTIFACT=$out" | Out-File -FilePath $Env:GITHUB_ENV -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.target }}
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+  # ── Create the GitHub Release ─────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create releases and upload assets
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          echo "── Checksums ──────────────────────"
+          cat SHA256SUMS.txt
+
+      # Strip the "cli/" prefix from the tag to get the bare version string
+      - name: Extract version
+        run: echo "VERSION=${GITHUB_REF_NAME#cli/}" >> "$GITHUB_ENV"
+
+      - name: Read changelog for this version
+        id: changelog
+        run: |
+          # Use the git tag annotation message as release notes if present,
+          # otherwise fall back to a generic message.
+          NOTES=$(git tag -l --format='%(contents)' "${{ github.ref_name }}" 2>/dev/null || true)
+          if [[ -z "$NOTES" ]]; then
+            NOTES="See commit history for changes."
+          fi
+          # Escape multiline for GITHUB_OUTPUT
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "xsil ${{ env.VERSION }}"
+          body: |
+            ## xsil ${{ env.VERSION }}
+
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+
+            ### Installation
+
+            Download the binary for your platform, extract it, and place `xsil` in your `$PATH`.
+
+            | Platform | File |
+            |----------|------|
+            | Linux x86_64 (static) | `xsil-x86_64-unknown-linux-musl.tar.gz` |
+            | Linux ARM64 (static)  | `xsil-aarch64-unknown-linux-musl.tar.gz` |
+            | macOS Intel           | `xsil-x86_64-apple-darwin.tar.gz` |
+            | macOS Apple Silicon   | `xsil-aarch64-apple-darwin.tar.gz` |
+            | Windows x86_64        | `xsil-x86_64-pc-windows-msvc.zip` |
+
+            Verify your download:
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            The Linux musl binaries are fully static — no glibc or OpenSSL
+            dependencies required. They run on any Linux distribution ≥ kernel 3.2.
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(env.VERSION, '-') }}

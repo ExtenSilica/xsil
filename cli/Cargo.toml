@@ -1,0 +1,37 @@
+[package]
+name = "xsil"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap       = { version = "4.4",     features = ["derive"] }
+colored    = "2.1"
+indicatif  = "0.17"
+directories = "5.0"
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow     = "1.0"
+reqwest    = { version = "=0.11.23", features = ["blocking", "json", "multipart"] }
+tar        = "0.4"
+flate2     = "1.0"
+sha2       = "0.10"
+hex        = "0.4"
+url        = "=2.4.1"
+urlencoding = "2.1"
+semver     = "1.0"
+uuid       = { version = "1.4", features = ["v4"] }
+chrono     = "0.4.42"
+simplelog  = "=0.12.1"
+log        = "0.4"
+fs2        = "0.4.3"
+glob       = "0.3"
+rpassword  = "7.3"
+
+# Pinned transitive deps (keep versions that compile cleanly together)
+time       = "=0.3.36"
+deranged   = "=0.3.11"
+native-tls = "=0.2.11"
+indexmap   = "=2.2.6"
+
+[dev-dependencies]
+tempfile = "3.27.0"

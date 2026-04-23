@@ -1,0 +1,32 @@
+# .xsilignore — files excluded from the .xsil archive during `xsil publish`
+# Syntax mirrors .gitignore: globs, leading / anchors to root, trailing / for
+# directories only, ! un-ignores a previously ignored path.
+# Built-in exclusions (always applied): .git  .xsilignore  .DS_Store  Thumbs.db
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+# Pre-compiled ELF binaries are intentionally excluded; the package ships
+# source + build instructions and the CLI/sim compiles on demand.
+sim/bin/
+
+# ── Toolchain (external — installed separately) ───────────────────────────────
+# The toolchain/ tree documents where to get the compiler; the binaries
+# themselves are not bundled in the .xsil archive.
+toolchain/bin/
+toolchain/lib/
+toolchain/include/
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS noise ──────────────────────────────────────────────────────────────────
+# (also caught by the built-in list, duplicated here for documentation)
+.DS_Store
+Thumbs.db
+
+# ── Temporary files ───────────────────────────────────────────────────────────
+*.tmp
+*.log

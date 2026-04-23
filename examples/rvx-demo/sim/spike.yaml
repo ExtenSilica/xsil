@@ -1,0 +1,22 @@
+# Spike ISS flags reference for rvx-demo
+#
+# This file is informational. The reference command is:
+#
+#   spike pk sim/bin/hello.elf
+#
+# With explicit flags:
+#
+#   spike --isa=rv64gc --priv=msu -m256 pk sim/bin/hello.elf
+#
+# Flag reference:
+#   --isa=rv64gc   RISC-V ISA string (base I + M/A/F/D/C extensions)
+#   --priv=msu     Privilege levels: Machine, Supervisor, User
+#   -m256          Physical memory: 256 MiB
+#
+# The proxy kernel (pk) provides a minimal Linux-like syscall interface
+# so that statically linked ELF binaries can call printf, write, exit, etc.
+# without a full OS. Install from: https://github.com/riscv-software-src/riscv-pk
+
+isa: rv64gc
+priv: msu
+mem: 256m

@@ -1,0 +1,11 @@
+{
+  "name": "fastaes",
+  "version": "1.0.5",
+  "author": "Test",
+  "summary": "Test",
+  "longDescription": "Test",
+  "createdAt": "2025-11-28T10:00:00Z",
+  "payloadHash": "504254f925324acf9878bf2b75228b8c350b7b8ba7a33f8edf26c4cb0727c318",
+  "payloadSize": 25,
+  "installSteps": ["echo Starting...", "badcmd123", "echo Should not see this"]
+}

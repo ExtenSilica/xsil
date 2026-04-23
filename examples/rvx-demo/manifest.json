@@ -1,0 +1,37 @@
+{
+  "name": "rvx-demo",
+  "version": "1.0.0",
+  "description": "Minimal RISC-V demo package: computes Fibonacci numbers under RV64GC simulation via Spike or QEMU.",
+  "author": "extensilica",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/extensilica/rvx-demo",
+  "homepage": "https://extensilica.com/package/rvx-demo",
+  "keywords": ["demo", "fibonacci", "spike", "qemu", "riscv", "rv64gc"],
+  "isa": "RV64GC",
+  "entry": "sh sim/run.sh",
+  "testEntry": "sh tests/run.sh",
+  "readme": "README.md",
+  "toolchain": {
+    "root": "toolchain",
+    "triple": "riscv64-unknown-elf",
+    "version": "14.2.0",
+    "external": true
+  },
+  "targets": {
+    "spike": {
+      "isa": "rv64gc",
+      "priv": "msu",
+      "mem": "256m",
+      "config": "sim/spike.yaml"
+    },
+    "qemu": {
+      "binary": "qemu-riscv64-static",
+      "flags": []
+    }
+  },
+  "checksums": {
+    "payload": "sha256:d84630cf41ca43dd9e06f151f6b2ed59ed54159c244b7f22dc953d59cccc5856",
+    "archive": ""
+  },
+  "payloadSize": 14664
+}
