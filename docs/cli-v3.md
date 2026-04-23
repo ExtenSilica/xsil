@@ -4,7 +4,7 @@
 **Language:** Rust  
 **Date:** March 2026  
 **Branch:** `pivot/npmjs-like-xsil-registry`  
-**Related:** [publishing-flow-v3.md](./publishing-flow-v3.md), [auth-v3.md](./auth-v3.md), [spec/xsil.md](../spec/xsil.md)
+**Related:** [publishing-flow-v3.md](./publishing-flow-v3.md), [spec/xsil.md](../spec/xsil.md)
 
 ---
 
