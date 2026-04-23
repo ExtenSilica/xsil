@@ -1,0 +1,9 @@
+# Rust
+cli/target/
+**/*.rs.bk
+
+# Local scratch
+*.xsil
+*.log
+.DS_Store
+Thumbs.db

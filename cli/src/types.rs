@@ -1,0 +1,148 @@
+use serde::{Deserialize, Serialize};
+
+// ── Manifest (in-package manifest.json) ──────────────────────────────────────
+
+/// Contents of `manifest.json` at the root of a `.xsil` archive.
+/// All fields that existed only for signing/licensing are removed.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Manifest {
+    pub name: String,
+    pub version: String,
+
+    #[serde(default)]
+    pub description: String,
+
+    #[serde(default)]
+    pub author: String,
+
+    pub isa: Option<String>,
+
+    /// Primary execution entry point, relative to package root.
+    pub entry: Option<String>,
+
+    /// Optional test entry point; default is `tests/run.sh` if present.
+    #[serde(rename = "testEntry")]
+    pub test_entry: Option<String>,
+
+    /// Toolchain descriptor — kept as a raw JSON value so any manifest shape is accepted.
+    pub toolchain: Option<serde_json::Value>,
+
+    /// Execution targets — kept as a raw JSON value (spike, qemu, fpga, etc.).
+    pub targets: Option<serde_json::Value>,
+
+    /// Search keywords for the registry.
+    pub keywords: Option<Vec<String>>,
+
+    pub license: Option<String>,
+    pub repository: Option<String>,
+    pub homepage: Option<String>,
+
+    /// SHA-256 of all non-manifest files (sorted path order). Used for integrity
+    /// validation at install/run time. Accepts bare hex or "sha256:<hex>" prefix.
+    #[serde(rename = "payloadHash", default)]
+    pub payload_hash: String,
+
+    /// Alternative field name from spec v2 checksums object. Preferred over payloadHash when present.
+    pub checksums: Option<ManifestChecksums>,
+
+    #[serde(rename = "payloadSize", default)]
+    pub payload_size: u64,
+}
+
+impl Manifest {
+    /// Returns the expected payload hash regardless of which field it was stored in.
+    /// Prefers `checksums.payload` (v2) over `payloadHash` (v1).
+    pub fn effective_payload_hash(&self) -> &str {
+        if let Some(ref c) = self.checksums {
+            if !c.payload.is_empty() {
+                return c.payload.trim_start_matches("sha256:");
+            }
+        }
+        self.payload_hash.trim_start_matches("sha256-").trim_start_matches("sha256:")
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ManifestChecksums {
+    #[serde(default)]
+    pub payload: String,
+    #[serde(default)]
+    pub archive: String,
+}
+
+// ── Registry API types ────────────────────────────────────────────────────────
+
+/// Package metadata returned by `GET /packages/:slug`.
+#[derive(Debug, Deserialize)]
+pub struct RegistryPackage {
+    pub id: u32,
+    pub name: String,
+    pub slug: String,
+    pub description: String,
+    #[serde(rename = "shortDescription")]
+    pub short_description: Option<String>,
+    pub author: String,
+    pub keywords: Option<Vec<String>>,
+    pub license: Option<String>,
+    #[serde(rename = "repositoryUrl")]
+    pub repository_url: Option<String>,
+    #[serde(rename = "homepageUrl")]
+    pub homepage_url: Option<String>,
+    #[serde(rename = "latestVersion")]
+    pub latest_version: Option<String>,
+    #[serde(rename = "totalDownloads", default)]
+    pub total_downloads: u64,
+    pub versions: Vec<RegistryVersion>,
+}
+
+/// One version entry inside a `RegistryPackage`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RegistryVersion {
+    pub version: String,
+    #[serde(rename = "xsilUrl")]
+    pub xsil_url: String,
+    /// SHA-256 of the full archive (for transit verification).
+    pub checksum: Option<String>,
+    /// SHA-256 of non-manifest files (matches Manifest.payloadHash).
+    #[serde(rename = "checksumPayload")]
+    pub checksum_payload: Option<String>,
+    pub isa: Option<String>,
+    pub toolchain: Option<String>,
+    pub targets: Option<String>,
+    pub size: Option<u64>,
+    #[serde(rename = "downloadCount", default)]
+    pub download_count: u64,
+    #[serde(rename = "isYanked", default)]
+    pub is_yanked: bool,
+    #[serde(rename = "yankReason")]
+    pub yank_reason: Option<String>,
+    pub changelog: Option<String>,
+    #[serde(rename = "publishedAt")]
+    pub published_at: Option<String>,
+}
+
+// ── Auth API types ────────────────────────────────────────────────────────────
+
+/// User profile returned by `GET /auth/me`.
+#[derive(Debug, Deserialize)]
+pub struct UserProfile {
+    pub id: u32,
+    pub username: String,
+    pub email: String,
+    pub bio: Option<String>,
+    #[serde(rename = "avatarUrl")]
+    pub avatar_url: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<String>,
+}
+
+// ── Local install state ───────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstalledExtension {
+    pub name: String,
+    pub version: String,
+    pub installed_at: String,
+    pub path: String,
+}
+
