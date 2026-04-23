@@ -3,7 +3,7 @@
 **Status:** Canonical definition  
 **Date:** March 2026  
 **Branch:** `pivot/npmjs-like-xsil-registry`  
-**Related:** [auth-v3.md](./auth-v3.md), [data-model-v3.md](./data-model-v3.md), [spec/xsil.md](../spec/xsil.md)
+**Related:** [spec/xsil.md](../spec/xsil.md) — normative format. (Registry auth and data model are documented in the private ExtenSilica platform repository.)
 
 ---
 
