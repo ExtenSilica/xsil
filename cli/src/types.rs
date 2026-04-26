@@ -179,6 +179,12 @@ pub struct RegistryVersion {
     /// Manifest `resolution.mode` value stored at publish time (`bundled`, `resolved`, …).
     #[serde(rename = "resolutionMode")]
     pub resolution_mode: Option<String>,
+    /// Readiness level (RL) computed at publish time (1–5 today).
+    #[serde(rename = "readinessLevel", default)]
+    pub readiness_level: Option<u8>,
+    /// JSON array of capability strings computed at publish time.
+    #[serde(default)]
+    pub capabilities: Option<String>,
 }
 
 // ── Auth API types ────────────────────────────────────────────────────────────

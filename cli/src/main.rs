@@ -10,6 +10,7 @@ use simplelog::*;
 use std::fs::File;
 use std::io::Read;
 use semver::Version;
+use std::collections::HashSet;
 
 mod types;
 mod registry;
@@ -621,6 +622,234 @@ fn dependencies_brief(raw: Option<&str>) -> Option<String> {
     }
 }
 
+fn safe_parse_json_value(raw: Option<&str>) -> Option<serde_json::Value> {
+    let s = raw?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    serde_json::from_str(s).ok()
+}
+
+fn safe_parse_json_object(raw: Option<&str>) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let v = safe_parse_json_value(raw)?;
+    v.as_object().cloned()
+}
+
+fn toolchain_external_flag(raw: Option<&str>) -> Option<bool> {
+    let tc = raw?.trim();
+    if tc.is_empty() {
+        return None;
+    }
+    if tc.starts_with('{') {
+        let o = safe_parse_json_object(Some(tc))?;
+        o.get("external").and_then(|x| x.as_bool())
+    } else {
+        None
+    }
+}
+
+fn execution_indicates_tests(execution_raw: Option<&str>) -> bool {
+    let Some(o) = safe_parse_json_object(execution_raw) else {
+        return false;
+    };
+    o.get("testEntry")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || o
+            .get("tests")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+}
+
+fn targets_object_keys(raw: Option<&str>) -> Vec<String> {
+    let Some(o) = safe_parse_json_object(raw) else {
+        return vec![];
+    };
+    o.keys().cloned().collect()
+}
+
+/// Mirrors `store-frontend/lib/xsil-parser.ts` `computeCapabilityBadges` (badges + RL level).
+fn compute_capability_badges(v: &RegistryVersion) -> (HashSet<&'static str>, u8) {
+    let mut badges: HashSet<&'static str> = HashSet::new();
+
+    if v.isa.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some() {
+        badges.insert("ISA");
+    }
+
+    let tc_external = toolchain_external_flag(v.toolchain.as_deref());
+    if tc_external == Some(true) {
+        badges.insert("Toolchain: external");
+    } else if tc_external == Some(false) {
+        badges.insert("Toolchain: bundled");
+    }
+
+    let keys = targets_object_keys(v.targets.as_deref());
+    let key = |k: &str| keys.iter().any(|x| x == k);
+    if key("spike") {
+        badges.insert("Sim: Spike");
+    }
+    if key("qemu") {
+        badges.insert("Emu: QEMU");
+    }
+    if key("fpga") {
+        badges.insert("FPGA");
+    }
+    if key("rtl") {
+        badges.insert("RTL");
+    }
+
+    if execution_indicates_tests(v.execution.as_deref()) {
+        badges.insert("Tests");
+    }
+
+    let rm = v
+        .resolution_mode
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    if rm == "bundled" {
+        badges.insert("Repro: bundled");
+    } else if rm == "resolved" {
+        badges.insert("Repro: resolved");
+    } else if rm == "host-dependent" || rm == "host_dependent" || rm == "hostdependent" {
+        badges.insert("Repro: host-dependent");
+    } else if tc_external == Some(true) {
+        badges.insert("Repro: host-dependent");
+    }
+
+    let has_sim = key("spike") || key("qemu");
+    let has_hw = key("fpga") || key("rtl");
+    let bundled_toolchain = tc_external == Some(false);
+    let has_tests = execution_indicates_tests(v.execution.as_deref());
+
+    let mut level: u8 = 1;
+    if has_sim {
+        level = 2;
+    }
+    if level >= 2 && bundled_toolchain {
+        level = 3;
+    }
+    if level >= 2 && has_tests {
+        level = 4;
+    }
+    if has_hw && level >= 2 {
+        level = 5;
+    }
+
+    (badges, level)
+}
+
+fn stored_capabilities_tokens(raw: Option<&str>) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Some(v) = safe_parse_json_value(raw) else {
+        return out;
+    };
+    if let Some(arr) = v.as_array() {
+        for x in arr {
+            if let Some(t) = x.as_str() {
+                let t = t.trim();
+                if !t.is_empty() {
+                    out.insert(t.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn readiness_name(level: u8) -> &'static str {
+    match level {
+        1 => "Packaged",
+        2 => "Runnable",
+        3 => "Reproducible",
+        4 => "Testable",
+        5 => "HW-evaluable",
+        _ => "Readiness",
+    }
+}
+
+fn print_readiness_block(v: &RegistryVersion) {
+    let (mut badge_set, inferred_level) = compute_capability_badges(v);
+    let rl = v.readiness_level.unwrap_or(inferred_level);
+    println!(
+        "  Readiness   : RL{} — {}",
+        rl,
+        readiness_name(rl)
+    );
+
+    let stored = stored_capabilities_tokens(v.capabilities.as_deref());
+    const BADGE_KEYS: [&str; 10] = [
+        "Repro: bundled",
+        "Repro: resolved",
+        "Repro: host-dependent",
+        "Toolchain: bundled",
+        "Toolchain: external",
+        "Sim: Spike",
+        "Emu: QEMU",
+        "RTL",
+        "FPGA",
+        "Tests",
+    ];
+    for t in &stored {
+        // Stored capabilities are authoritative when present.
+        if let Some(k) = BADGE_KEYS.iter().copied().find(|k| *k == t.as_str()) {
+            badge_set.insert(k);
+        }
+    }
+
+    let exec_obj = safe_parse_json_object(v.execution.as_deref());
+    let has_entry = exec_obj
+        .as_ref()
+        .and_then(|o| o.get("entry"))
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || stored.contains("entry");
+    let has_test_entry = exec_obj
+        .as_ref()
+        .and_then(|o| o.get("testEntry"))
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || stored.contains("testEntry");
+
+    println!("  Capabilities:");
+    let rows: [(&str, bool); 12] = [
+        ("Runnable (entry declared)", has_entry),
+        ("Testable (testEntry declared)", has_test_entry),
+        ("Repro: bundled", badge_set.contains("Repro: bundled")),
+        ("Repro: resolved", badge_set.contains("Repro: resolved")),
+        (
+            "Repro: host-dependent",
+            badge_set.contains("Repro: host-dependent"),
+        ),
+        (
+            "Toolchain: bundled",
+            badge_set.contains("Toolchain: bundled"),
+        ),
+        (
+            "Toolchain: external",
+            badge_set.contains("Toolchain: external"),
+        ),
+        ("Sim: Spike", badge_set.contains("Sim: Spike")),
+        ("Emu: QEMU", badge_set.contains("Emu: QEMU")),
+        ("RTL", badge_set.contains("RTL")),
+        ("FPGA", badge_set.contains("FPGA")),
+        ("Tests", badge_set.contains("Tests")),
+    ];
+    for (label, ok) in rows {
+        let mark = if ok { "✓" } else { "✗" };
+        println!("    {mark} {label}");
+    }
+}
+
 fn print_registry_version_repro_fields(v: &RegistryVersion) {
     if let Some(ref m) = v.resolution_mode {
         let t = m.trim();
@@ -725,6 +954,7 @@ fn cmd_info(
                 println!("  ISA         : {}", isa);
                 println!("  Downloads   : {}", dl);
                 println!("  Published   : {}", v.published_at.as_deref().unwrap_or("—"));
+                print_readiness_block(v);
                 print_registry_version_repro_fields(v);
                 if let Some(ref cs) = v.checksum {
                     println!("  Checksum    : {}", &cs[..cs.len().min(20)]);
@@ -756,6 +986,7 @@ fn cmd_info(
                 "  ── Latest version (v{}) — registry metadata ──",
                 lv.version.cyan()
             );
+            print_readiness_block(lv);
             print_registry_version_repro_fields(lv);
         }
     }
