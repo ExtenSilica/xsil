@@ -113,6 +113,14 @@ pub struct ManifestChecksums {
 
 // ── Registry API types ────────────────────────────────────────────────────────
 
+/// Org scope echoed on `GET /packages/:slug` when the package belongs to an organization.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RegistryOrgSummary {
+    pub slug: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+}
+
 /// Package metadata returned by `GET /packages/:slug`.
 #[derive(Debug, Deserialize)]
 pub struct RegistryPackage {
@@ -133,6 +141,10 @@ pub struct RegistryPackage {
     pub latest_version: Option<String>,
     #[serde(rename = "totalDownloads", default)]
     pub total_downloads: u64,
+    #[serde(rename = "weeklyDownloads", default)]
+    pub weekly_downloads: u64,
+    #[serde(default)]
+    pub org: Option<RegistryOrgSummary>,
     pub versions: Vec<RegistryVersion>,
 }
 
@@ -160,6 +172,13 @@ pub struct RegistryVersion {
     pub changelog: Option<String>,
     #[serde(rename = "publishedAt")]
     pub published_at: Option<String>,
+    /// JSON string of manifest `execution` (registry echo).
+    pub execution: Option<String>,
+    /// JSON string of manifest `dependencies` (registry echo).
+    pub dependencies: Option<String>,
+    /// Manifest `resolution.mode` value stored at publish time (`bundled`, `resolved`, …).
+    #[serde(rename = "resolutionMode")]
+    pub resolution_mode: Option<String>,
 }
 
 // ── Auth API types ────────────────────────────────────────────────────────────

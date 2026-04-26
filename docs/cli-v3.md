@@ -203,13 +203,21 @@ xsil test ./rvv-demo/
 
 ### `xsil info <package>`
 
-Display registry metadata and local install status for a package.
+Display registry metadata and local install status for a package. Calls **`GET /packages/:slug`** and prints fields the registry stores per package and per version (including v0.2 **`resolutionMode`**, **`targets`**, **`toolchain`**, **`dependencies`**, and **`execution`** echoes from the published manifest).
 
 ```bash
 xsil info rvv-demo
+xsil info rvv-demo@1.1.0
+xsil info @acme/cool-ext
 ```
 
-**Output:**
+**Package-level lines (when present in JSON):** `homepageUrl`, **`org`** (`@slug` + display name), **`totalDownloads`**, **`weeklyDownloads`**, plus name, slug, author, description, keywords, license, repository.
+
+**Latest-version snapshot (no `@version` on the slug):** after the `Latest:` line, a block **── Latest version (v…) — registry metadata ──** summarises the semver-latest non-yanked row: **Resolution**, **Targets** (keys or array entries), **Toolchain** (one line; detects `external`), **Dependencies** (count of `tools` when JSON lists them), **`entry` / `testEntry`** when `execution` is valid JSON.
+
+**Pinned version (`slug@ver`):** a **── Version … ──** section includes ISA, downloads, published date, the same reproducibility block, checksum prefix, changelog first line, yank state, and `xsil install slug@ver`.
+
+**Output (illustrative):**
 
 ```
 ➤ Fetching info for rvv-demo...
@@ -220,11 +228,23 @@ xsil info rvv-demo
   Keywords    : rvv, vector, spike
   License     : Apache-2.0
   Repository  : https://github.com/alice/rvv-demo
+  Homepage    : https://example.com/rvv-demo
+  Organization: @acme (ACME Labs)
   Downloads   : 1427
+  Weekly dl   : 42
   Versions    : 3
   Latest      : 1.2.0
+
+  ── Latest version (v1.2.0) — registry metadata ──
+  Resolution  : bundled — reproducible; no resolved tool downloads
+  Targets     : spike
+  Toolchain   : riscv64-unknown-elf (bundled)
+  Dependencies: 2 tool(s) declared in manifest
+  entry         : ./scripts/run.sh
+  testEntry     : ./scripts/test.sh
+
   Available   :
-    1.2.0 (RV64GCV — 842 downloads)
+    1.2.0 (RV64GCV — 842 downloads) (latest)
     1.1.0 (RV64GCV — 431 downloads)
     1.0.0 (RV64GCV — 154 downloads)
   Installed   : 1.1.0 at /home/alice/.extensilica/extensions/rvv-demo/1.1.0
