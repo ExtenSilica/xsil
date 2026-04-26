@@ -31,7 +31,7 @@ Together, **`build`** answers “is this directory a valid, reproducible package
 
 **Typical responsibilities (normative intent):**
 
-1. **Validate** — Parse `manifest.json`; ensure required fields exist; ensure paths referenced by `entry`, `targets`, and `toolchain.root` exist; ensure required top-level directories are present (`sim/`, `toolchain/`, `tests/`, `docs/` per spec).
+1. **Validate** — Parse `manifest.json`; ensure required fields exist; ensure paths referenced by `execution.entry` (or legacy `entry`), `targets`, and `toolchain.root` exist; ensure required top-level directories are present (`sim/`, `toolchain/`, `tests/`, `docs/` per spec).
 2. **Pack** — Create the archive with `manifest.json` at the root and directory contents as specified.
 3. **Hash** — Compute `payloadHash` (per project policy—commonly SHA-256 over payload files) and write/update manifest fields so `xsil run` / `xsil test` can verify integrity.
 4. **Sign (optional)** — If publisher signing is enabled, add signature material to the manifest after hashing.
@@ -96,13 +96,13 @@ After **`xsil build`**, the manifest should also carry **`payloadHash`** (and op
 
 ## How to define the entry point
 
-The primary run hook is the manifest field **`entry`**: a **path relative to the package root** (e.g. `sim/run.sh`) to a script or binary that **`xsil run`** executes after unpack.
+The primary run hook is the manifest field **`execution.entry`** (or legacy `entry`): a command/script that **`xsil run`** executes after unpack and dependency resolution.
 
 - Prefer a **shell script** under `sim/` that invokes Spike, QEMU, or a thin wrapper around your bundled `toolchain/`.
 - The script must be **executable** on the target OS or invoked explicitly (e.g. `bash sim/run.sh`) if documented in `docs/`.
 - **`xsil run`** uses **`entry`** together with **`targets`** to choose simulator vs FPGA (see [execution-model.md](./execution-model.md)): **simulator is the default**; FPGA only when requested or when no sim path exists.
 
-Optional: **`testEntry`** — path for **`xsil test`** (if not using the default `tests/run.sh`).
+Optional: **`execution.testEntry`** — command for **`xsil test`** (if not using the default `tests/run.sh`).
 
 ---
 

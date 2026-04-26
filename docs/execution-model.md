@@ -50,6 +50,7 @@ The manifest’s `targets` object lists what the package supports. At minimum th
 | `spike` | Simulator |
 | `qemu` | Simulator |
 | `fpga` | FPGA (optional) |
+| `rtl` | Metadata-only (RTL sources; not executed by `xsil run`) |
 
 Empty objects `{}` are allowed when behavior is implied by `sim/` or `docs/`.
 
@@ -67,6 +68,8 @@ When the user runs `xsil run <package>` **without** forcing FPGA:
    - implementation-defined policy after printing a clear warning.
 
 **FPGA is never required** for a conforming package that declares at least one simulator-related target or provides a default `entry` that runs in simulation.
+
+**RTL note:** `targets.rtl` exists for discoverability (registry badges, completeness signaling) and does not change the default execution priority. If a package ships RTL only (no `spike`/`qemu`), it may still be a valid artifact for distribution, but `xsil run` is not guaranteed to succeed unless a runnable simulator or FPGA path is also provided and documented.
 
 ---
 

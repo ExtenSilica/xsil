@@ -1,8 +1,8 @@
-# XSIL Package Format Specification v2.0
+# XSIL Package Format Specification v0.2 — Self-Resolving Packages
 
 **Status:** Draft  
-**Version:** 2.0  
-**Last Updated:** March 2026
+**Version:** 0.2  
+**Last Updated:** April 2026
 
 ---
 
@@ -10,7 +10,9 @@
 
 A **`.xsil` file** is a **versioned, self-describing package** for publishing and running reproducible RISC-V implementations.
 
-A package may include simulation assets, toolchains, tests, documentation, and optionally FPGA bitstreams. It is the canonical unit of distribution in the ExtenSilica registry: one `.xsil` file maps to one package name at one immutable version, and contains everything needed to run or test that implementation without undeclared host dependencies.
+A package may include simulation assets, tests, documentation, and optionally FPGA bitstreams and RTL sources.
+
+**v0.2 focus:** packages are **self-resolving**. A package does not need to bundle every dependency inside the archive, but it **must declare every dependency required to run**, and the XSIL runtime/CLI must resolve those dependencies automatically (download, verify by hash, cache, execute) without manual user setup.
 
 ---
 
@@ -35,6 +37,7 @@ docs/                  (required) Extended documentation
 tests/                 (required) Test suite and vectors
 sim/                   (required) Simulation scripts and assets
 toolchain/             (required) Self-contained toolchain (compiler, headers, specs)
+rtl/                   (optional) RTL sources, build scripts, and integration collateral (see §5.3)
 bitstream/             (optional) FPGA bitstreams; only required when targets.fpga is present
 assets/                (optional) Auxiliary files (data, waveforms, examples)
 ```
@@ -68,10 +71,11 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
 | `description` | string | Short human-readable description (plain text, ≤ 280 characters). |
 | `author` | string | Publisher name or username. Must match the authenticated registry user for publication. |
 | `isa` | string | RISC-V ISA string (e.g. `RV64GCV`, `RV32IMAC_Xcustom`). |
-| `entry` | string | Path (relative to unpacked root) to the primary execution script or binary. The CLI invokes this for `xsil run`. |
+| `execution` | object | Execution block for `xsil run` / `xsil test` (see §4.4). |
 | `toolchain` | object | Describes the bundled toolchain (see §6). |
 | `targets` | object | Supported execution backends (see §5). At least one target must be declared. |
 | `checksums` | object | Integrity digests (see §7). |
+| `resolution` | object | Reproducibility policy (bundled/resolved/host-dependent) (see §4.5). |
 
 ### 4.2 Optional fields
 
@@ -82,11 +86,12 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
 | `homepage` | string | URL of the project homepage or registry page. |
 | `keywords` | array of string | Search tags. Lowercase, no spaces. Shown on the registry package page. |
 | `readme` | string | Path to the README file inside the archive (default: `README.md`). |
-| `testEntry` | string | Path to the test entry point. The CLI uses this for `xsil test`. Defaults to `tests/run.sh` if that file exists. |
+| `testEntry` | string | **Legacy**. Deprecated by `execution.testEntry`. |
 | `payloadHash` | string | Legacy field: SHA-256 digest of all non-manifest files concatenated in sorted path order (`sha256:<hex>`). Superseded by `checksums.payload` in v2.0; both may be present for compatibility. |
 | `payloadSize` | number | Total byte size of non-manifest files. Used by the CLI progress display. |
+| `dependencies` | object | Dependency declarations used when `resolution.mode` is `resolved` (see §4.6). |
 
-### 4.3 Full example
+### 4.3 Full example (resolved)
 
 ```json
 {
@@ -99,13 +104,35 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
   "homepage": "https://extensilica.com/package/rvv-demo",
   "keywords": ["rvv", "vector", "simulation", "spike"],
   "isa": "RV64GCV",
-  "entry": "sim/run.sh",
-  "testEntry": "tests/run.sh",
+  "execution": {
+    "entry": "sh sim/run.sh",
+    "testEntry": "sh tests/run.sh",
+    "env": {
+      "PATH": "$XSIL_TOOLCHAIN_ROOT/bin:$XSIL_SPIKE_ROOT/bin:$PATH"
+    }
+  },
   "readme": "README.md",
   "toolchain": {
     "root": "toolchain",
     "version": "14.2.0",
     "triple": "riscv64-unknown-elf"
+  },
+  "resolution": {
+    "mode": "resolved"
+  },
+  "dependencies": {
+    "tools": [
+      {
+        "name": "spike",
+        "version": "1.1.1-xsil.3",
+        "platforms": {
+          "linux-x86_64": {
+            "url": "https://registry.extensilica.dev/tools/spike/1.1.1-xsil.3/spike-linux-x86_64.tar.zst",
+            "sha256": "..."
+          }
+        }
+      }
+    ]
   },
   "targets": {
     "spike": { "config": "sim/spike.yaml" },
@@ -120,6 +147,52 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
 }
 ```
 
+### 4.4 Execution (v0.2)
+
+`execution` defines how `xsil run` and `xsil test` launch a package after unpack and dependency resolution.
+
+| Field | Required | Type | Meaning |
+|-------|----------|------|---------|
+| `entry` | Yes (for runnable packages) | string | Command or script path to run. |
+| `testEntry` | No | string | Command or script path for tests. |
+| `workdir` | No | string | Working directory relative to package root (default: `.`). |
+| `env` | No | object | Environment variables. Supports `$XSIL_*_ROOT` expansion by the runtime. |
+
+**Backwards compatibility:** legacy top-level `entry` / `testEntry` MAY be present for older tooling. When both are present, `execution.*` takes precedence.
+
+### 4.5 Resolution (v0.2)
+
+`resolution` declares the reproducibility policy for the package.
+
+| Mode | Meaning |
+|------|---------|
+| `bundled` | Everything needed to run is inside the `.xsil` archive. |
+| `resolved` | Dependencies are declared and are resolved automatically by the runtime (download + hash verify + cache). |
+| `host-dependent` | Depends on pre-installed host tools. Allowed, but not eligible for runnable/reproducible badges. |
+
+`resolution.mode` MUST NOT be `latest` or any moving target.
+
+### 4.6 Dependencies (v0.2)
+
+When `resolution.mode` is `resolved`, the manifest SHOULD include `dependencies` so the runtime can resolve tools automatically.
+
+#### `dependencies.tools[]`
+
+Each entry declares a tool artifact pinned by version and verified by hash per platform:
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | Yes | Tool identifier (publisher-defined). |
+| `version` | Yes | Pinned version string (MUST NOT be `latest`). |
+| `platforms` | Yes | Map of platform → artifact descriptor. |
+
+Each platform artifact MUST include:
+
+- `url` (string)
+- `sha256` (string) — required; URLs without hashes MUST be rejected.
+
+Tool Registry is the default trusted source, but external URLs are permitted only with hashes and SHOULD be displayed with a warning in UIs.
+
 ---
 
 ## 5. Targets
@@ -133,6 +206,7 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
 | `spike` | [Spike RISC-V ISA Simulator](https://github.com/riscv-software-src/riscv-isa-sim) | Most common default for simulation packages. |
 | `qemu` | [QEMU](https://www.qemu.org/) system or user-mode | Use `machine` and `cpu` subfields as needed. |
 | `fpga` | FPGA synthesis and programming flow | FPGA support is **optional**. See §5.2. |
+| `rtl` | RTL implementation | Optional, but first-class for discovery and registry badges. See §5.3. |
 
 Each target value is a JSON object with backend-specific keys. An empty object `{}` is valid when defaults are fully documented in `docs/`.
 
@@ -146,6 +220,25 @@ FPGA support is **optional**. If `targets.fpga` is present:
 **No platform board catalog.** ExtenSilica does not maintain a global registry of board identifiers. Hardware target IDs are declared exclusively by the publisher inside each package. The CLI must use only what the package declares, and must never reject a package on the basis of an unknown board name.
 
 ---
+
+### 5.3 RTL targets (optional)
+
+RTL sources may be shipped inside the `.xsil` archive for reproducibility, review, and downstream integration. This is **orthogonal** to simulation/emulation and FPGA: a package may provide RTL without providing bitstreams, and may provide bitstreams without providing RTL sources.
+
+If `targets.rtl` is present, the package should include a top-level `rtl/` directory containing the implementation and any build/test wrappers.
+
+Recommended fields (not all are required; publishers may add additional keys):
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `language` | string | e.g. `sv`, `verilog`, `chisel`, `vhdl` |
+| `top` | string | top module/entity name (publisher-defined) |
+| `root` | string | path to RTL root inside the archive (default: `rtl`) |
+| `build` | string | path to a build script inside the archive (e.g. `rtl/build.sh`) |
+| `test` | string | path to a RTL test entry (e.g. `rtl/test.sh`) |
+| `docs` | string | path to integration docs (e.g. `docs/rtl.md`) |
+
+**Normative intent:** `targets.rtl` exists so the registry and tooling can reliably identify “this package ships RTL” and present it as a capability badge. It does not require the CLI to synthesize RTL as part of `xsil run`.
 
 ## 6. Toolchain
 

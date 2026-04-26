@@ -8,14 +8,23 @@
   "homepage": "https://extensilica.com/package/rvx-demo",
   "keywords": ["demo", "fibonacci", "spike", "qemu", "riscv", "rv64gc"],
   "isa": "RV64GC",
-  "entry": "sh sim/run.sh",
-  "testEntry": "sh tests/run.sh",
+  "execution": {
+    "entry": "sh sim/run.sh",
+    "testEntry": "sh tests/run.sh",
+    "env": {}
+  },
+  "resolution": {
+    "mode": "host-dependent"
+  },
   "readme": "README.md",
   "toolchain": {
     "root": "toolchain",
     "triple": "riscv64-unknown-elf",
     "version": "14.2.0",
     "external": true
+  },
+  "dependencies": {
+    "tools": []
   },
   "targets": {
     "spike": {
