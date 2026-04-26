@@ -6,6 +6,8 @@
 **Branch:** `pivot/npmjs-like-xsil-registry`  
 **Related:** [publishing-flow-v3.md](./publishing-flow-v3.md), [spec/xsil.md](../spec/xsil.md)
 
+This file is the **canonical** CLI reference for this repository.
+
 ---
 
 ## Overview
@@ -213,9 +215,9 @@ xsil info @acme/cool-ext
 
 **Package-level lines (when present in JSON):** `homepageUrl`, **`org`** (`@slug` + display name), **`totalDownloads`**, **`weeklyDownloads`**, plus name, slug, author, description, keywords, license, repository.
 
-**Latest-version snapshot (no `@version` on the slug):** after the `Latest:` line, a block **── Latest version (v…) — registry metadata ──** summarises the semver-latest non-yanked row: **Resolution**, **Targets** (keys or array entries), **Toolchain** (one line; detects `external`), **Dependencies** (count of `tools` when JSON lists them), **`entry` / `testEntry`** when `execution` is valid JSON.
+**Latest-version snapshot (no `@version` on the slug):** after the `Latest:` line, a block **── Latest version (v…) — registry metadata ──** includes **Readiness** (**`readinessLevel`** when present, otherwise inferred the same way as the webapp) plus a **Capabilities** checklist (Runnable / testEntry / repro modes / toolchain / simulators / RTL / FPGA / Tests). It then summarises **Resolution**, **Targets** (keys or array entries), **Toolchain** (one line; detects `external`), **Dependencies** (count of `tools` when JSON lists them), **`entry` / `testEntry`** when `execution` is valid JSON.
 
-**Pinned version (`slug@ver`):** a **── Version … ──** section includes ISA, downloads, published date, the same reproducibility block, checksum prefix, changelog first line, yank state, and `xsil install slug@ver`.
+**Pinned version (`slug@ver`):** a **── Version … ──** section includes ISA, downloads, published date, the same **Readiness + Capabilities** block, the same reproducibility block, checksum prefix, changelog first line, yank state, and `xsil install slug@ver`.
 
 **Output (illustrative):**
 
@@ -236,6 +238,20 @@ xsil info @acme/cool-ext
   Latest      : 1.2.0
 
   ── Latest version (v1.2.0) — registry metadata ──
+  Readiness   : RL4 — Testable
+  Capabilities:
+    ✓ Runnable (entry declared)
+    ✓ Testable (testEntry declared)
+    ✓ Repro: bundled
+    ✗ Repro: resolved
+    ✗ Repro: host-dependent
+    ✓ Toolchain: bundled
+    ✗ Toolchain: external
+    ✓ Sim: Spike
+    ✗ Emu: QEMU
+    ✗ RTL
+    ✗ FPGA
+    ✓ Tests
   Resolution  : bundled — reproducible; no resolved tool downloads
   Targets     : spike
   Toolchain   : riscv64-unknown-elf (bundled)
@@ -322,13 +338,15 @@ Each installed package version gets its own directory. The manifest, simulation 
 
 ## Integrity Model
 
-Every `install`, `run`, and `test` command validates the payload hash before executing:
+Every `install`, `run`, and `test` command validates the **payload** hash (non-manifest files) before executing:
 
 1. Compute SHA-256 over all non-manifest files (sorted lexicographically by path).
 2. Compare with `manifest.checksums.payload` (v2) or `manifest.payloadHash` (v1).
 3. If they differ → abort with an error.
 
-This guarantee means: if you run `xsil run rvv-demo@1.0.0` today and again in two years, you will get **exactly the same bytes** executing on your machine — or you will get an explicit integrity error, never a silent substitution.
+**What this promises:** when validation succeeds, the **extracted package files** covered by that checksum match what the author published for that version—you do not get a silent substitution of those files. It does **not** imply every run is bitwise-identical across hosts or time (resolved toolchains, host-dependent resolution, OS caches, and anything outside the payload hash can still differ). If validation fails, the CLI aborts with an explicit integrity error.
+
+For target selection and when `xsil run` may still fail after a good checksum, see [execution-model.md](./execution-model.md).
 
 ---
 

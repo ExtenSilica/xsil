@@ -8,6 +8,8 @@ Public **reference CLI** and documentation for the **`.xsil`** RISC-V package fo
 
 The ExtenSilica **registry, website, and hosted API** live in a separate **private** product repository. This repo is intentionally **tooling + format + examples** only.
 
+Product positioning for the hosted platform (pre-silicon bridge, readiness levels) is documented in that private repo’s **`docs/pre-silicon-bridge.md`** / **`docs/pre-silicon-bridge-readiness.md`** when you have access.
+
 ## Install
 
 From [GitHub Releases](https://github.com/ExtenSilica/xsil/releases) (tags `cli/v*.*.*`) or:
