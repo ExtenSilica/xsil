@@ -24,6 +24,15 @@ pub struct Manifest {
     #[serde(rename = "testEntry")]
     pub test_entry: Option<String>,
 
+    /// v0.2 execution block (preferred): { entry, testEntry, env, ... }.
+    pub execution: Option<serde_json::Value>,
+
+    /// v0.2 dependencies block (preferred): { tools: [...], ... }.
+    pub dependencies: Option<serde_json::Value>,
+
+    /// v0.2 resolution block (preferred): { mode: "bundled"|"resolved"|"host-dependent", ... }.
+    pub resolution: Option<serde_json::Value>,
+
     /// Toolchain descriptor — kept as a raw JSON value so any manifest shape is accepted.
     pub toolchain: Option<serde_json::Value>,
 
@@ -59,6 +68,38 @@ impl Manifest {
             }
         }
         self.payload_hash.trim_start_matches("sha256-").trim_start_matches("sha256:")
+    }
+
+    /// Entry command for `xsil run`, preferring v0.2 `execution.entry` over legacy `entry`.
+    pub fn effective_entry(&self) -> Option<String> {
+        if let Some(ref exec) = self.execution {
+            if let Some(v) = exec.get("entry").and_then(|x| x.as_str()) {
+                let t = v.trim();
+                if !t.is_empty() {
+                    return Some(t.to_string());
+                }
+            }
+        }
+        self.entry
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Test entry command for `xsil test`, preferring v0.2 `execution.testEntry` over legacy `testEntry`.
+    pub fn effective_test_entry(&self) -> Option<String> {
+        if let Some(ref exec) = self.execution {
+            if let Some(v) = exec.get("testEntry").and_then(|x| x.as_str()) {
+                let t = v.trim();
+                if !t.is_empty() {
+                    return Some(t.to_string());
+                }
+            }
+        }
+        self.test_entry
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 }
 

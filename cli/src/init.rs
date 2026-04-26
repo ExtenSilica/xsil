@@ -222,6 +222,17 @@ mem: 128m
         isa: Some("RV64GC".to_string()),
         entry: Some("sh sim/run.sh".to_string()),
         test_entry: Some("sh tests/run.sh".to_string()),
+        execution: Some(serde_json::json!({
+            "entry": "sh sim/run.sh",
+            "testEntry": "sh tests/run.sh",
+            "env": {}
+        })),
+        dependencies: Some(serde_json::json!({
+            "tools": []
+        })),
+        resolution: Some(serde_json::json!({
+            "mode": "host-dependent"
+        })),
         toolchain: Some(serde_json::json!({
             "root": "toolchain",
             "triple": "riscv64-unknown-elf",

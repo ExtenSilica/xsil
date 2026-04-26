@@ -16,6 +16,7 @@ mod registry;
 mod manager;
 mod init;
 mod constants;
+mod resolver;
 
 use registry::RegistryClient;
 use manager::ExtensionManager;
@@ -240,14 +241,25 @@ fn run() -> Result<()> {
         Commands::Run { package } => {
             let (work_dir, manifest, cleanup) = resolve_and_load(&registry, &manager, package)?;
             let entry = manifest
-                .entry
+                .effective_entry()
+                .context("manifest has no entry (set `execution.entry` or legacy `entry`)")?;
+            let resolved = resolver::resolve_execution_env(&manifest, &work_dir)?;
+            let exec_env: std::collections::HashMap<String, String> = manifest
+                .execution
                 .as_ref()
-                .context("manifest.json has no `entry` field (required for xsil run)")?;
+                .and_then(|e| e.get("env"))
+                .and_then(|v| v.as_object())
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
             if cli.dry_run {
                 println!("{} Dry run: would execute entry: {}", "✔".green(), entry);
             } else {
                 println!("{} Running: {}", "➤".blue(), entry);
-                manager.run_shell_in_package(&work_dir, entry)?;
+                manager.run_shell_in_package_resolved(&work_dir, &entry, &resolved, &exec_env)?;
                 println!("{} Done.", "✔".green());
             }
             if cleanup {
@@ -258,21 +270,33 @@ fn run() -> Result<()> {
         // ── Test ──────────────────────────────────────────────────────────────
         Commands::Test { package } => {
             let (work_dir, manifest, cleanup) = resolve_and_load(&registry, &manager, package)?;
-            let test_cmd = if let Some(ref te) = manifest.test_entry {
-                te.clone()
+            let test_cmd = if let Some(te) = manifest.effective_test_entry() {
+                te
             } else if work_dir.join("tests/run.sh").is_file() {
                 "tests/run.sh".to_string()
             } else {
                 if cleanup {
                     fs::remove_dir_all(&work_dir).ok();
                 }
-                bail!("No test entry: set `testEntry` in manifest.json or add tests/run.sh");
+                bail!("No test entry: set `execution.testEntry` (or legacy `testEntry`) or add tests/run.sh");
             };
+            let resolved = resolver::resolve_execution_env(&manifest, &work_dir)?;
+            let exec_env: std::collections::HashMap<String, String> = manifest
+                .execution
+                .as_ref()
+                .and_then(|e| e.get("env"))
+                .and_then(|v| v.as_object())
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
             if cli.dry_run {
                 println!("{} Dry run: would run tests: {}", "✔".green(), test_cmd);
             } else {
                 println!("{} Running tests: {}", "➤".blue(), test_cmd);
-                manager.run_shell_in_package(&work_dir, &test_cmd)?;
+                manager.run_shell_in_package_resolved(&work_dir, &test_cmd, &resolved, &exec_env)?;
                 println!("{} Tests passed.", "✔".green());
             }
             if cleanup {
@@ -779,8 +803,8 @@ fn validate_publish_manifest(m: &Manifest) -> Result<()> {
     if m.author.is_empty() {
         bail!("manifest.author is required");
     }
-    if m.entry.is_none() {
-        bail!("manifest.entry is required");
+    if m.effective_entry().is_none() {
+        bail!("manifest entry is required (set `execution.entry` or legacy `entry`).");
     }
     Ok(())
 }

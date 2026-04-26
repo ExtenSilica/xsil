@@ -10,6 +10,7 @@ use colored::*;
 use semver::Version;
 
 use crate::types::{InstalledExtension, Manifest};
+use crate::resolver::{ResolvedEnv, expand_env};
 use std::collections::HashMap;
 
 // ── .xsilignore support ───────────────────────────────────────────────────────
@@ -483,6 +484,7 @@ impl ExtensionManager {
     // ── Execution ─────────────────────────────────────────────────────────────
 
     /// Run a shell command with the package root as the working directory.
+    #[allow(dead_code)]
     pub fn run_shell_in_package(&self, package_root: &Path, command: &str) -> Result<()> {
         let status = std::process::Command::new("sh")
             .arg("-c")
@@ -490,6 +492,48 @@ impl ExtensionManager {
             .current_dir(package_root)
             .status()
             .context("Failed to run command")?;
+        if !status.success() {
+            bail!("Command exited with status: {:?}", status.code());
+        }
+        Ok(())
+    }
+
+    /// Run a shell command with an env overlay and PATH prefix list.
+    pub fn run_shell_in_package_resolved(
+        &self,
+        package_root: &Path,
+        command: &str,
+        resolved: &ResolvedEnv,
+        extra_env: &HashMap<String, String>,
+    ) -> Result<()> {
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg(command).current_dir(package_root);
+
+        // Compute PATH with prefixes.
+        let mut path_parts: Vec<String> = Vec::new();
+        for p in &resolved.path_prefixes {
+            path_parts.push(p.to_string_lossy().to_string());
+        }
+        if let Ok(cur) = std::env::var("PATH") {
+            path_parts.push(cur);
+        }
+        let merged_path = path_parts
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(":");
+
+        cmd.env("PATH", merged_path);
+        for (k, v) in &resolved.vars {
+            cmd.env(k, v);
+        }
+
+        // Apply execution.env (expanded).
+        for (k, v) in extra_env {
+            cmd.env(k, expand_env(v, &resolved.vars));
+        }
+
+        let status = cmd.status().context("Failed to run command")?;
         if !status.success() {
             bail!("Command exited with status: {:?}", status.code());
         }
