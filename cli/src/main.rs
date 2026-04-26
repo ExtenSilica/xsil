@@ -534,6 +534,139 @@ fn cmd_install(
     Ok(())
 }
 
+fn format_resolution_mode(mode: &str) -> String {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "bundled" => "bundled — reproducible; no resolved tool downloads".to_string(),
+        "resolved" => "resolved — dependencies.tools may be fetched per policy".to_string(),
+        "host-dependent" | "host_dependent" | "hostdependent" => {
+            "host-dependent — toolchain or host may differ".to_string()
+        }
+        _ => mode.to_string(),
+    }
+}
+
+/// Summarise `targets` JSON from the registry (object keys or string array).
+fn summarize_registry_targets(raw: Option<&str>) -> Option<String> {
+    let s = raw?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(s).ok()?;
+    match v {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<_> = map.keys().map(|k| k.as_str().to_string()).collect();
+            keys.sort();
+            if keys.is_empty() {
+                None
+            } else {
+                Some(keys.join(", "))
+            }
+        }
+        serde_json::Value::Array(a) => {
+            let parts: Vec<String> = a
+                .iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(", "))
+            }
+        }
+        _ => Some(s.chars().take(96).collect()),
+    }
+}
+
+fn registry_toolchain_one_line(raw: Option<&str>) -> Option<String> {
+    let s = raw?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+            let triple = v
+                .get("triple")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim();
+            let ext = v.get("external").and_then(|x| x.as_bool()).unwrap_or(false);
+            let mut out = if triple.is_empty() {
+                v.to_string().chars().take(120).collect::<String>()
+            } else if ext {
+                format!("{triple} (external)")
+            } else {
+                format!("{triple} (bundled)")
+            };
+            if out.len() > 140 {
+                out.truncate(137);
+                out.push_str("...");
+            }
+            return Some(out);
+        }
+    }
+    Some(s.chars().take(140).collect())
+}
+
+fn dependencies_brief(raw: Option<&str>) -> Option<String> {
+    let s = raw?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(s).ok()?;
+    let n = v.get("tools").and_then(|t| t.as_array())?.len();
+    if n == 0 {
+        None
+    } else {
+        Some(format!("{n} tool(s) declared in manifest"))
+    }
+}
+
+fn print_registry_version_repro_fields(v: &RegistryVersion) {
+    if let Some(ref m) = v.resolution_mode {
+        let t = m.trim();
+        if !t.is_empty() {
+            println!("  Resolution  : {}", format_resolution_mode(t));
+        }
+    }
+    if let Some(ref s) = summarize_registry_targets(v.targets.as_deref()) {
+        println!("  Targets     : {}", s);
+    }
+    if let Some(ref line) = registry_toolchain_one_line(v.toolchain.as_deref()) {
+        println!("  Toolchain   : {}", line);
+    }
+    if let Some(ref dep) = dependencies_brief(v.dependencies.as_deref()) {
+        println!("  Dependencies: {}", dep);
+    }
+    if let Some(ref exec_raw) = v.execution {
+        let ex = exec_raw.trim();
+        if !ex.is_empty() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(ex) {
+                if let Some(e) = val
+                    .get("entry")
+                    .and_then(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    println!("  entry         : {}", e);
+                }
+                if let Some(e) = val
+                    .get("testEntry")
+                    .and_then(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    println!("  testEntry     : {}", e);
+                }
+            } else {
+                println!(
+                    "  execution     : {}",
+                    ex.chars().take(120).collect::<String>()
+                );
+            }
+        }
+    }
+}
+
 fn cmd_info(
     registry: &RegistryClient,
     manager: &ExtensionManager,
@@ -561,7 +694,18 @@ fn cmd_info(
     if let Some(ref repo) = pkg.repository_url {
         println!("  Repository  : {}", repo);
     }
+    if let Some(ref hp) = pkg.homepage_url {
+        println!("  Homepage    : {}", hp);
+    }
+    if let Some(ref o) = pkg.org {
+        println!(
+            "  Organization: @{} ({})",
+            o.slug.bold(),
+            o.display_name
+        );
+    }
     println!("  Downloads   : {}", pkg.total_downloads);
+    println!("  Weekly dl   : {}", pkg.weekly_downloads);
     println!("  Versions    : {}", pkg.versions.len());
 
     if let Some(ref latest) = pkg.latest_version {
@@ -581,6 +725,7 @@ fn cmd_info(
                 println!("  ISA         : {}", isa);
                 println!("  Downloads   : {}", dl);
                 println!("  Published   : {}", v.published_at.as_deref().unwrap_or("—"));
+                print_registry_version_repro_fields(v);
                 if let Some(ref cs) = v.checksum {
                     println!("  Checksum    : {}", &cs[..cs.len().min(20)]);
                 }
@@ -600,6 +745,18 @@ fn cmd_info(
             Err(e) => {
                 eprintln!("{} {}", "⚠".yellow(), e);
             }
+        }
+    }
+
+    // When no @version: show reproducibility / execution snapshot for semver-latest.
+    if requested_version.is_none() {
+        if let Ok(lv) = resolve_version(&pkg, None, false) {
+            println!();
+            println!(
+                "  ── Latest version (v{}) — registry metadata ──",
+                lv.version.cyan()
+            );
+            print_registry_version_repro_fields(lv);
         }
     }
 
