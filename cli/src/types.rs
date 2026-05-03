@@ -202,6 +202,31 @@ pub struct UserProfile {
     pub created_at: Option<String>,
 }
 
+// ── Artifact resolution API (resolved-mode tool dependencies) ─────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ResolvedToolArtifact {
+    pub name: String,
+    pub version: String,
+    pub platform: String,
+    pub sha256: String,
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MissingToolArtifact {
+    pub name: String,
+    pub version: String,
+    pub platform: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveArtifactsResponse {
+    pub resolved: Vec<ResolvedToolArtifact>,
+    pub missing: Vec<MissingToolArtifact>,
+}
+
 // ── Local install state ───────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]

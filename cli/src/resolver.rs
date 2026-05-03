@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::types::Manifest;
+use crate::registry::RegistryClient;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedEnv {
@@ -35,6 +36,16 @@ fn strip_sha256_prefix(s: &str) -> &str {
     } else {
         t
     }
+}
+
+fn dependency_key(name: &str, version: &str, platform: &str, sha256: &str) -> String {
+    format!(
+        "{}::{}::{}::{}",
+        name.trim(),
+        version.trim(),
+        platform.trim(),
+        strip_sha256_prefix(sha256).to_ascii_lowercase()
+    )
 }
 
 fn sanitize_env_key(name: &str) -> String {
@@ -87,13 +98,17 @@ fn unpack_tool_archive(bytes: &[u8], dest: &Path, url: &str) -> Result<()> {
     ensure_dir(dest)?;
     let lower = url.to_ascii_lowercase();
 
-    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+    // Prefer content sniffing so authenticated/proxied URLs without file extensions still work.
+    let is_gzip = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
+    let is_zstd = bytes.len() >= 4 && bytes[0] == 0x28 && bytes[1] == 0xB5 && bytes[2] == 0x2F && bytes[3] == 0xFD;
+
+    if is_gzip || lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
         let gz = flate2::read::GzDecoder::new(bytes);
         let mut ar = tar::Archive::new(gz);
         ar.unpack(dest).context("unpack .tar.gz")?;
         return Ok(());
     }
-    if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
+    if is_zstd || lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
         let dec = zstd::stream::read::Decoder::new(bytes).context("init zstd decoder")?;
         let mut ar = tar::Archive::new(dec);
         ar.unpack(dest).context("unpack .tar.zst")?;
@@ -103,6 +118,14 @@ fn unpack_tool_archive(bytes: &[u8], dest: &Path, url: &str) -> Result<()> {
         let mut ar = tar::Archive::new(bytes);
         ar.unpack(dest).context("unpack .tar")?;
         return Ok(());
+    }
+    // Last chance: attempt plain tar even without extension.
+    if let Ok(mut entries) = tar::Archive::new(bytes).entries() {
+        if entries.next().transpose().is_ok() {
+            let mut ar = tar::Archive::new(bytes);
+            ar.unpack(dest).context("unpack tar stream")?;
+            return Ok(());
+        }
     }
     bail!("Unsupported tool archive format for URL: {}", url);
 }
@@ -128,7 +151,11 @@ fn pick_toolchain_root_key(tool_roots: &HashMap<String, PathBuf>) -> Option<Stri
 /// - Verifies sha256
 /// - Extracts into ~/.extensilica/cache/tools/<name>/<version>/<platform>/<sha256>/
 /// - Exposes XSIL_<TOOL>_ROOT env vars
-pub fn resolve_execution_env(manifest: &Manifest, package_root: &Path) -> Result<ResolvedEnv> {
+pub fn resolve_execution_env(
+    manifest: &Manifest,
+    package_root: &Path,
+    registry: Option<&RegistryClient>,
+) -> Result<ResolvedEnv> {
     let platform = detect_platform();
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut path_prefixes: Vec<PathBuf> = Vec::new();
@@ -175,6 +202,11 @@ pub fn resolve_execution_env(manifest: &Manifest, package_root: &Path) -> Result
         .unwrap_or_default();
 
     let client = Client::builder().no_gzip().build().unwrap_or_else(|_| Client::new());
+    let resolved_urls: HashMap<String, String> = if let (Some(reg), Some(deps)) = (registry, manifest.dependencies.as_ref()) {
+        reg.resolve_artifacts(deps)?
+    } else {
+        HashMap::new()
+    };
     let mut tool_roots: HashMap<String, PathBuf> = HashMap::new();
 
     println!("{} Resolving dependencies...", "➤".blue());
@@ -199,7 +231,7 @@ pub fn resolve_execution_env(manifest: &Manifest, package_root: &Path) -> Result
             .and_then(|v| v.as_object())
             .with_context(|| format!("tool {}@{} has no artifact for platform {}", name, version, platform))?;
 
-        let url = art
+        let declared_url = art
             .get("url")
             .and_then(|v| v.as_str())
             .context("tool artifact url is required")?
@@ -213,6 +245,11 @@ pub fn resolve_execution_env(manifest: &Manifest, package_root: &Path) -> Result
         if sha.len() < 32 {
             bail!("tool {}@{} has invalid sha256", name, version);
         }
+        let key = dependency_key(name, version, &platform, &sha);
+        let url = resolved_urls
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| declared_url.clone());
 
         let dest = cache_root()
             .join(name)
@@ -224,7 +261,11 @@ pub fn resolve_execution_env(manifest: &Manifest, package_root: &Path) -> Result
             println!("{} {}@{} found in cache", "✓".green(), name.bold(), version.cyan());
         } else {
             println!("{} downloading {}@{}", "↓".blue(), name.bold(), version.cyan());
-            let bytes = download_bytes(&client, &url)?;
+            let bytes = if let Some(reg) = registry {
+                reg.download_from_url(&url)?
+            } else {
+                download_bytes(&client, &url)?
+            };
             let got = sha256_hex(&bytes);
             if got != sha {
                 bail!(

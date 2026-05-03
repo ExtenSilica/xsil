@@ -2,9 +2,10 @@ use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::collections::HashMap;
 use colored::*;
 
-use crate::types::{RegistryPackage, UserProfile};
+use crate::types::{RegistryPackage, ResolveArtifactsResponse, UserProfile};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,15 @@ impl RegistryClient {
 
     fn auth_header(&self) -> Option<String> {
         self.load_token().map(|t| format!("Bearer {}", t))
+    }
+
+    fn dependency_key(name: &str, version: &str, platform: &str, sha256: &str) -> String {
+        let sha = sha256
+            .trim()
+            .trim_start_matches("sha256:")
+            .trim_start_matches("sha256-")
+            .to_ascii_lowercase();
+        format!("{}::{}::{}::{}", name.trim(), version.trim(), platform.trim(), sha)
     }
 
     // ── Auth endpoints ────────────────────────────────────────────────────────
@@ -350,6 +360,64 @@ impl RegistryClient {
         let mut buffer = Vec::new();
         resp.read_to_end(&mut buffer)?;
         Ok(buffer)
+    }
+
+    /// Resolve resolved-mode dependency URLs through the backend so auth/policy is enforced.
+    /// Returns a map keyed by "<name>::<version>::<platform>::<sha256>".
+    pub fn resolve_artifacts(
+        &self,
+        dependencies: &serde_json::Value,
+    ) -> Result<HashMap<String, String>> {
+        let auth = self
+            .auth_header()
+            .context("Not logged in. Run `xsil login` first to resolve dependency artifacts.")?;
+
+        let body = serde_json::json!({ "dependencies": dependencies });
+        let resp = self
+            .client
+            .post(format!("{}/api/artifacts/resolve", self.base_url))
+            .header("Authorization", auth)
+            .json(&body)
+            .send()
+            .context("Failed to reach artifact resolver endpoint")?;
+
+        let status = resp.status();
+        let json: serde_json::Value = resp
+            .json()
+            .context("Invalid response from artifact resolver")?;
+        if !status.is_success() {
+            bail!(
+                "Artifact resolve failed ({}): {}",
+                status,
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error")
+            );
+        }
+
+        let parsed: ResolveArtifactsResponse = serde_json::from_value(json)
+            .context("Failed to parse resolved artifacts response")?;
+        if !parsed.missing.is_empty() {
+            let sample = parsed
+                .missing
+                .iter()
+                .take(3)
+                .map(|m| format!("{}@{} [{}]", m.name, m.version, m.platform))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "Missing dependency artifacts in ExtenSilica registry: {}{}",
+                sample,
+                if parsed.missing.len() > 3 { "..." } else { "" }
+            );
+        }
+
+        let mut out = HashMap::new();
+        for r in parsed.resolved {
+            let key = Self::dependency_key(&r.name, &r.version, &r.platform, &r.sha256);
+            out.insert(key, r.url);
+        }
+        Ok(out)
     }
 }
 
