@@ -244,7 +244,7 @@ fn run() -> Result<()> {
             let entry = manifest
                 .effective_entry()
                 .context("manifest has no entry (set `execution.entry` or legacy `entry`)")?;
-            let resolved = resolver::resolve_execution_env(&manifest, &work_dir)?;
+            let resolved = resolver::resolve_execution_env(&manifest, &work_dir, Some(&registry))?;
             let exec_env: std::collections::HashMap<String, String> = manifest
                 .execution
                 .as_ref()
@@ -281,7 +281,7 @@ fn run() -> Result<()> {
                 }
                 bail!("No test entry: set `execution.testEntry` (or legacy `testEntry`) or add tests/run.sh");
             };
-            let resolved = resolver::resolve_execution_env(&manifest, &work_dir)?;
+            let resolved = resolver::resolve_execution_env(&manifest, &work_dir, Some(&registry))?;
             let exec_env: std::collections::HashMap<String, String> = manifest
                 .execution
                 .as_ref()
@@ -461,6 +461,11 @@ fn cmd_install(
             );
             return Ok(());
         }
+        // Prefetch resolved dependencies before committing install so package is ready immediately.
+        let (prefetch_dir, prefetch_manifest) = manager.extract_and_validate_xsil(&bytes)?;
+        let prefetch_result = resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
+        fs::remove_dir_all(&prefetch_dir).ok();
+        prefetch_result?;
         manager.install_extension(&manifest.name, &manifest.version, &bytes, force)?;
         println!(
             "{} Installed {} v{}",
@@ -524,6 +529,12 @@ fn cmd_install(
     let pb = progress_spinner("Downloading...");
     let bytes = registry.download_from_url(&version.xsil_url)?;
     pb.finish_with_message("Download complete");
+
+    // Prefetch resolved dependencies before install commit.
+    let (prefetch_dir, prefetch_manifest) = manager.extract_and_validate_xsil(&bytes)?;
+    let prefetch_result = resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
+    fs::remove_dir_all(&prefetch_dir).ok();
+    prefetch_result?;
 
     manager.install_extension(&slug, &version.version, &bytes, force)?;
     println!(
