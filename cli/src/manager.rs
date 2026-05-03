@@ -407,6 +407,36 @@ impl ExtensionManager {
         hex::encode(hasher.finalize())
     }
 
+    /// Compute the payload hash directly from a `.xsil` tarball's bytes.
+    /// Mirrors `compute_payload_hash` semantics — extracts to a scratch
+    /// directory, hashes the same set of files, then removes the scratch dir.
+    /// Used by `xsil publish <archive.xsil>` so the published checksum is
+    /// computed from the actual archive contents instead of (silently) zero
+    /// files when a non-directory path is passed to `compute_payload_hash`.
+    pub fn compute_payload_hash_from_archive_bytes(&self, tarball_data: &[u8]) -> Result<String> {
+        let temp_dir = self
+            .root_dir
+            .join("tmp")
+            .join(format!("publish-hash-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir)?;
+
+        let tar = GzDecoder::new(tarball_data);
+        let mut archive = Archive::new(tar);
+        if let Err(e) = archive.unpack(&temp_dir) {
+            fs::remove_dir_all(&temp_dir).ok();
+            return Err(e).context("Failed to unpack archive for payload hashing");
+        }
+
+        if !temp_dir.join("manifest.json").is_file() {
+            fs::remove_dir_all(&temp_dir).ok();
+            bail!("Archive missing manifest.json at root; cannot compute payload hash");
+        }
+
+        let hash = self.compute_payload_hash(&temp_dir);
+        fs::remove_dir_all(&temp_dir).ok();
+        hash
+    }
+
     /// Compute the total byte size of all non-manifest, non-ignored files.
     #[allow(dead_code)]
     pub fn compute_payload_size(&self, dir: &Path) -> Result<u64> {
@@ -707,6 +737,35 @@ mod tests {
         let h = mgr.compute_payload_hash(&root).expect("hash");
         assert_eq!(
             h,
+            "d84630cf41ca43dd9e06f151f6b2ed59ed54159c244b7f22dc953d59cccc5856"
+        );
+    }
+
+    /// Regression test for the `xsil publish <archive.xsil>` checksum bug:
+    /// hashing the unpacked contents of an archive built from a directory
+    /// must match hashing the directory itself.  Previously
+    /// `compute_payload_hash(<file path>)` was called for the archive branch
+    /// and silently returned the sha256 of zero bytes (`e3b0c44…`), which the
+    /// backend rejected as a checksum mismatch.
+    #[test]
+    fn payload_hash_from_archive_bytes_matches_directory() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/rvx-demo");
+        let root = root.canonicalize().expect("rvx-demo path");
+        let mgr = ExtensionManager::new(std::env::temp_dir());
+
+        let from_dir = mgr.compute_payload_hash(&root).expect("dir hash");
+        let bytes = mgr.pack_directory(&root).expect("pack rvx-demo");
+        let from_archive = mgr
+            .compute_payload_hash_from_archive_bytes(&bytes)
+            .expect("archive hash");
+
+        assert_eq!(
+            from_dir, from_archive,
+            "archive-derived payload hash must equal the source-tree hash"
+        );
+        // Also assert it's the published golden — keeps both helpers honest.
+        assert_eq!(
+            from_archive,
             "d84630cf41ca43dd9e06f151f6b2ed59ed54159c244b7f22dc953d59cccc5856"
         );
     }
