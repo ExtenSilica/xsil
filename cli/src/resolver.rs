@@ -194,18 +194,32 @@ pub fn resolve_execution_env(
         return Ok(ResolvedEnv { vars, path_prefixes });
     }
 
-    let deps = manifest.dependencies.as_ref().context("resolution.mode=resolved requires manifest.dependencies")?;
-    let tools = deps
-        .get("tools")
+    let tools = manifest
+        .dependencies
+        .as_ref()
+        .and_then(|d| d.get("tools"))
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
 
+    if tools.is_empty() {
+        return Ok(ResolvedEnv { vars, path_prefixes });
+    }
+
     let client = Client::builder().no_gzip().build().unwrap_or_else(|_| Client::new());
-    let resolved_urls: HashMap<String, String> = if let (Some(reg), Some(deps)) = (registry, manifest.dependencies.as_ref()) {
-        reg.resolve_artifacts(deps)?
-    } else {
-        HashMap::new()
+    let resolved_urls: HashMap<String, String> = match (registry, manifest.dependencies.as_ref()) {
+        (Some(reg), Some(deps)) => match reg.resolve_artifacts(deps) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!(
+                    "{} Registry artifact resolve skipped ({}). Using declared URLs from the manifest.",
+                    "!".yellow(),
+                    e
+                );
+                HashMap::new()
+            }
+        },
+        _ => HashMap::new(),
     };
     let mut tool_roots: HashMap<String, PathBuf> = HashMap::new();
 
