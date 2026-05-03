@@ -336,7 +336,10 @@ fn cmd_publish(
     let input = PathBuf::from(path);
 
     // Determine if input is a directory or an existing .xsil file.
-    let (xsil_bytes, manifest) = if input.is_dir() {
+    // The `from_dir` flag drives how we compute the payload hash below — for
+    // directories we hash the source tree, for archives we hash the unpacked
+    // contents so the result matches what install/run will recompute.
+    let (xsil_bytes, manifest, from_dir) = if input.is_dir() {
         // Validate manifest.
         let manifest_path = input.join("manifest.json");
         if !manifest_path.exists() {
@@ -351,13 +354,13 @@ fn cmd_publish(
 
         println!("{} Packing {}...", "➤".blue(), input.display());
         let bytes = manager.pack_directory(&input)?;
-        (bytes, manifest)
+        (bytes, manifest, true)
     } else if input.extension().map_or(false, |e| e == "xsil") {
         let bytes = fs::read(&input).context("Failed to read .xsil file")?;
         // Extract manifest from the archive.
         let manifest = extract_manifest_from_bytes(&bytes)?;
         validate_publish_manifest(&manifest)?;
-        (bytes, manifest)
+        (bytes, manifest, false)
     } else {
         bail!("Expected a directory or a .xsil file, got: {}", path);
     };
@@ -381,13 +384,17 @@ fn cmd_publish(
         .map(|kw| kw.join(","))
         .unwrap_or_default();
 
-    // Compute checksums.
-    let checksum_payload = manager.compute_payload_hash(PathBuf::from(path).as_path())
-        .unwrap_or_else(|_| {
-            // If input was a .xsil file we can't easily recompute from bytes here;
-            // use the manifest value.
-            manifest.effective_payload_hash().to_string()
-        });
+    // Compute checksums.  Choose the source by input kind: source-tree hash
+    // for directories, unpacked-archive hash for `.xsil` files.  Previously
+    // both branches called `compute_payload_hash(path)`; for a `.xsil` file
+    // that returned the SHA-256 of zero bytes (`e3b0c44…`) because the file
+    // walker silently treats non-directory paths as empty, which the backend
+    // then rejected as a checksum mismatch.
+    let checksum_payload = if from_dir {
+        manager.compute_payload_hash(&input)?
+    } else {
+        manager.compute_payload_hash_from_archive_bytes(&xsil_bytes)?
+    };
     let checksum_archive = manager.compute_archive_checksum(&xsil_bytes);
     let size = xsil_bytes.len() as u64;
 
