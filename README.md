@@ -12,13 +12,21 @@ Product positioning for the hosted platform (pre-silicon bridge, readiness level
 
 ## Install
 
-From [GitHub Releases](https://github.com/ExtenSilica/xsil/releases) (tags `cli/v*.*.*`) or:
+From [crates.io](https://crates.io/crates/xsil) (recommended):
+
+```bash
+cargo install xsil
+```
+
+Or from a checkout of this repo:
 
 ```bash
 cargo install --path cli
 ```
 
-Official installers (pinned to this org/repo):
+Or grab a pre-built binary from
+[GitHub Releases](https://github.com/ExtenSilica/xsil/releases) (tags `cli/v*.*.*`)
+or via the official installer:
 
 ```bash
 curl -fsSL https://extensilica.com/install.sh | sh
@@ -27,10 +35,17 @@ curl -fsSL https://extensilica.com/install.sh | sh
 ## Quick commands
 
 ```bash
+# Interactive scaffold (full wizard)
+xsil new
+
+# Non-interactive scaffold
 xsil init my-extension
 cd my-extension && xsil run .
 
+# Run a bundled example (in this repo)
 xsil run examples/rvx-demo
+
+# Publish (dry run first)
 xsil publish ./my-extension --dry-run
 ```
 
