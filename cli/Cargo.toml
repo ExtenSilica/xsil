@@ -2,6 +2,21 @@
 name = "xsil"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
+description = "Reference CLI for the .xsil RISC-V ISA extension package format. Scaffold, build, run, test and publish custom RISC-V instruction packages."
+license = "ISC"
+readme = "README.md"
+repository = "https://github.com/ExtenSilica/xsil"
+homepage = "https://extensilica.com"
+documentation = "https://extensilica.com/docs"
+authors = ["ExtenSilica contributors"]
+keywords = ["riscv", "isa", "extension", "cli", "package"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    "target/**",
+    "*.xsil",
+    "out.log",
+]
 
 [dependencies]
 clap       = { version = "4.4",     features = ["derive"] }
