@@ -16,6 +16,7 @@ mod types;
 mod registry;
 mod manager;
 mod init;
+mod wizard;
 mod constants;
 mod resolver;
 
@@ -77,6 +78,56 @@ enum Commands {
         /// Value for `manifest.author` (default: `git config user.name`, else `your-username`)
         #[arg(long, value_name = "NAME")]
         author: Option<String>,
+    },
+
+    /// Extension Wizard — like `init` plus opcodes.json, examples/, and Spike-friendly templates.
+    ///
+    /// Runs interactively by default (asks for description, ISA, license, custom
+    /// instructions, optional extra targets). Pass `--non-interactive` with the
+    /// flags below to script it.
+    New {
+        /// Unscoped package slug (also the directory name)
+        name: String,
+        /// Parent directory for `<name>/` (default: current working directory)
+        #[arg(long, value_name = "DIR")]
+        parent: Option<PathBuf>,
+        /// Remove an existing `<parent>/<name>` directory before creating files
+        #[arg(long)]
+        force: bool,
+        /// Skip prompts; use defaults + flags only
+        #[arg(long)]
+        non_interactive: bool,
+        /// `manifest.description` (one line)
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+        /// `manifest.author`
+        #[arg(long, value_name = "NAME")]
+        author: Option<String>,
+        /// Initial semver, default `0.1.0`
+        #[arg(long, value_name = "X.Y.Z")]
+        version: Option<String>,
+        /// Base ISA (e.g. RV64GC, RV32IMAFC). Default: `RV64GC`
+        #[arg(long, value_name = "ISA")]
+        isa: Option<String>,
+        /// SPDX license id, default `Apache-2.0`
+        #[arg(long, value_name = "LICENSE")]
+        license: Option<String>,
+        /// Repository URL (required, http or https). The wizard will prompt
+        /// for it when missing in interactive mode.
+        #[arg(long, value_name = "URL")]
+        repository: Option<String>,
+        /// Optional homepage URL (http or https)
+        #[arg(long, value_name = "URL")]
+        homepage: Option<String>,
+        /// Add `qemu` placeholder target with `status: planned`
+        #[arg(long)]
+        with_qemu: bool,
+        /// Add `binutils` placeholder target with `status: planned`
+        #[arg(long)]
+        with_binutils: bool,
+        /// Add `llvm` placeholder target with `status: planned`
+        #[arg(long)]
+        with_llvm: bool,
     },
 
     /// Download and install a package under ~/.extensilica/extensions/
@@ -217,6 +268,66 @@ fn run() -> Result<()> {
                 let created = init::cmd_init(&manager, name, parent.as_deref(), *force, author.as_deref())?;
                 println!(
                     "{} Created package skeleton at {}",
+                    "✔".green(),
+                    created.display().to_string().bold()
+                );
+                println!("  {}", "Next:".dimmed());
+                println!("    cd {}", created.display());
+                println!("    xsil run .");
+                println!("    xsil test .");
+                println!("    xsil publish . --dry-run");
+            }
+        }
+
+        Commands::New {
+            name,
+            parent,
+            force,
+            non_interactive,
+            description,
+            author,
+            version,
+            isa,
+            license,
+            repository,
+            homepage,
+            with_qemu,
+            with_binutils,
+            with_llvm,
+        } => {
+            if cli.dry_run {
+                println!(
+                    "{} Would create wizard package at {}/{}",
+                    "✔".green(),
+                    parent
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string()),
+                    name
+                );
+            } else {
+                let args = wizard::WizardArgs {
+                    name: name.clone(),
+                    parent: parent.clone(),
+                    force: *force,
+                    non_interactive: *non_interactive,
+                    author: author.clone(),
+                    description: description.clone(),
+                    version: version.clone(),
+                    isa: isa.clone(),
+                    license: license.clone(),
+                    repository: repository.clone(),
+                    homepage: homepage.clone(),
+                    instructions: vec![],
+                    targets: wizard::WizardTargets {
+                        qemu: *with_qemu,
+                        binutils: *with_binutils,
+                        llvm: *with_llvm,
+                    },
+                };
+                let created = wizard::cmd_new(&manager, args)?;
+                println!(
+                    "{} Created wizard package at {}",
                     "✔".green(),
                     created.display().to_string().bold()
                 );
