@@ -8,6 +8,10 @@ cli/target/
 .DS_Store
 Thumbs.db
 
+# Editor / agent / local build artifacts
+.claude/
+build/
+
 # CLI dev-only test trees (never ship in public releases)
 cli/check_signed/
 cli/tampered_pkg/
