@@ -46,6 +46,16 @@ pub struct Manifest {
     pub repository: Option<String>,
     pub homepage: Option<String>,
 
+    /// Honest classification of the extension's relationship to the RISC-V standard.
+    /// One of: "ratified", "draft", "vendor", "research", "custom".
+    /// Optional for backwards compatibility with v0.1 manifests.
+    #[serde(rename = "standardStatus", default, skip_serializing_if = "Option::is_none")]
+    pub standard_status: Option<String>,
+
+    /// Free-text spec authority (e.g. "RISC-V International", "T-Head / XuanTie").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+
     /// SHA-256 of all non-manifest files (sorted path order). Used for integrity
     /// validation at install/run time. Accepts bare hex or "sha256:<hex>" prefix.
     #[serde(rename = "payloadHash", default)]

@@ -119,6 +119,19 @@ enum Commands {
         /// Optional homepage URL (http or https)
         #[arg(long, value_name = "URL")]
         homepage: Option<String>,
+        /// Honest classification of the extension's relationship to the
+        /// RISC-V standard. One of: ratified, draft, vendor, research, custom.
+        ///
+        /// Required (the wizard prompts for it in interactive mode). Don't
+        /// label something `ratified` unless RISC-V International has frozen
+        /// the spec — the registry checks this and surfaces it on the
+        /// package page.
+        #[arg(long = "standard-status", value_name = "STATUS")]
+        standard_status: Option<String>,
+        /// Free-text spec authority (e.g. "RISC-V International",
+        /// "T-Head / XuanTie", "University of Michigan"). Required.
+        #[arg(long, value_name = "TEXT")]
+        authority: Option<String>,
         /// Add `qemu` placeholder target with `status: planned`
         #[arg(long)]
         with_qemu: bool,
@@ -291,6 +304,8 @@ fn run() -> Result<()> {
             license,
             repository,
             homepage,
+            standard_status,
+            authority,
             with_qemu,
             with_binutils,
             with_llvm,
@@ -318,6 +333,8 @@ fn run() -> Result<()> {
                     license: license.clone(),
                     repository: repository.clone(),
                     homepage: homepage.clone(),
+                    standard_status: standard_status.clone(),
+                    authority: authority.clone(),
                     instructions: vec![],
                     targets: wizard::WizardTargets {
                         qemu: *with_qemu,
