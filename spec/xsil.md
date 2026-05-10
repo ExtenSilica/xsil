@@ -218,6 +218,29 @@ Hard rules:
 
 Tooling SHOULD surface `standardStatus` prominently in the package UI and group catalog statistics by it.
 
+### 4.8 Port status — registry-side provenance (v2.2)
+
+`portStatus` describes the package's **provenance on a registry**, separately and independently of `standardStatus` (which describes the spec). It is intentionally **NOT a manifest field**: the registry maintains it server-side so publishers cannot misrepresent themselves as the official upstream maintainer.
+
+Values:
+
+| Value | Meaning |
+|-------|---------|
+| `seeded` | Auto-published by a registry's catalog-seed agent from public upstream sources. The upstream maintainer has not (yet) claimed authorship. |
+| `community_port` | Ported by a non-upstream community member; useful, but not vetted as official. |
+| `claimed` | The current owner went through a registry's ownership-request flow and was approved by a registry admin. |
+| `official` | A registry admin verified the publisher's identity / affiliation with the upstream project. |
+| `archived` | Upstream is dead or the package has been intentionally frozen. Still installable; no further updates expected. |
+
+Hard rules:
+
+- Implementations MUST NOT read `portStatus` from `manifest.json`. If a publisher includes it, the registry MUST ignore the field.
+- A registry MAY default newly created packages to `null` (unmarked / self-published) and only stamp `seeded` for accounts it has explicitly designated as catalog-seed bots.
+- Approving an ownership-claim on a `seeded` or `community_port` package SHOULD automatically promote it to `claimed`.
+- `official` is reserved for registry-side identity verification and MUST require admin action.
+
+ExtenSilica implements this field as of registry release v2.2; CLI/spec versions ≥ 2.1 are unaffected because the manifest format is unchanged.
+
 ---
 
 ## 5. Targets
@@ -342,3 +365,4 @@ When published to the ExtenSilica registry:
 | 1.0 | 2025-03 | Initial format: gzip-tar, `manifest.json`, layout `sim/`, `toolchain/`, `tests/`, `docs/`, optional `bitstream/`; fields `name`, `version`, `isa`, `entry`, `targets`, `toolchain`, `description`; targets `spike`, `qemu`, `fpga`. |
 | 2.0 | 2026-03 | Added required fields `author`, `checksums`; optional fields `license`, `repository`, `homepage`, `keywords`, `readme`, `testEntry`; added `assets/` directory; introduced `checksums` object superseding legacy `payloadHash`; added §8 Versioning, §9 Registry Integration; removed commercial/trust sections; clarified FPGA optionality and no-platform-board-catalog rule. |
 | 2.1 | 2026-05 | Added `standardStatus` and `authority` (§4.2 + §4.7) for honest classification of ratified / draft / vendor / research / custom extensions. Both fields are required by the registry and prompted for by `xsil new` and the web wizard. |
+| 2.2 | 2026-05 | Added §4.8 documenting `portStatus` as a registry-side, server-set provenance field (seeded / community_port / claimed / official / archived). Manifest format is unchanged — registries MUST ignore any `portStatus` value carried in `manifest.json`. |
