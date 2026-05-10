@@ -254,6 +254,8 @@ mem: 128m
         license: Some("MIT".to_string()),
         repository: None,
         homepage: None,
+        standard_status: Some("custom".to_string()),
+        authority: Some("TODO: who defines this extension?".to_string()),
         payload_hash: String::new(),
         checksums: Some(ManifestChecksums {
             payload: format!("sha256:{}", hash),

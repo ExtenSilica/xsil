@@ -84,6 +84,8 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
 | `license` | string | [SPDX license identifier](https://spdx.org/licenses/) (e.g. `Apache-2.0`, `MIT`). |
 | `repository` | string | URL of the source repository. |
 | `homepage` | string | URL of the project homepage or registry page. |
+| `standardStatus` | string | Honest classification of the extension's relationship to the RISC-V standard (see §4.7). One of: `ratified`, `draft`, `vendor`, `research`, `custom`. Required by the registry from spec v2.1; tooling SHOULD warn when missing. |
+| `authority` | string | Free-text identifier of the body that defines the extension (e.g. `RISC-V International`, `T-Head / XuanTie`, `University of Michigan`). Length 2–200 characters. Required alongside `standardStatus`. |
 | `keywords` | array of string | Search tags. Lowercase, no spaces. Shown on the registry package page. |
 | `readme` | string | Path to the README file inside the archive (default: `README.md`). |
 | `testEntry` | string | **Legacy**. Deprecated by `execution.testEntry`. |
@@ -102,6 +104,8 @@ The manifest is a UTF-8 JSON object at the archive root. It is the authoritative
   "license": "Apache-2.0",
   "repository": "https://github.com/alice/rvv-demo",
   "homepage": "https://extensilica.com/package/rvv-demo",
+  "standardStatus": "ratified",
+  "authority": "RISC-V International",
   "keywords": ["rvv", "vector", "simulation", "spike"],
   "isa": "RV64GCV",
   "execution": {
@@ -192,6 +196,27 @@ Each platform artifact MUST include:
 - `sha256` (string) — required; URLs without hashes MUST be rejected.
 
 Tool Registry is the default trusted source, but external URLs are permitted only with hashes and SHOULD be displayed with a warning in UIs.
+
+### 4.7 Standard status (v2.1)
+
+`standardStatus` and `authority` express the package's honest relationship to the RISC-V standard. Both fields are stored at the top level of `manifest.json`, and the registry persists them on the package record so consumers can filter and audit the catalog.
+
+| Value | Meaning | Typical authority |
+|-------|---------|-------------------|
+| `ratified` | Frozen specification approved by RISC-V International. The encoding is locked; future changes go into a separate extension. | `RISC-V International` |
+| `draft` | Working draft from RISC-V International or another standards body. Not ratified yet — the encoding may still change. | `RISC-V International`, vendor consortium |
+| `vendor` | Custom extension defined and shipped by a commercial vendor. | `T-Head / XuanTie`, `SiFive`, `Qualcomm`, `Andes`, `Ventana`, … |
+| `research` | Academic / experimental extension, often used in research papers or pre-production prototypes. | university or research group |
+| `custom` | Bespoke or one-off extension that does not fit the categories above. | individual or team |
+
+Hard rules:
+
+- A publisher MUST NOT label a package `ratified` unless RISC-V International has actually frozen the specification.
+- The registry SHOULD reject manifests whose `standardStatus` is unknown or absent (legacy v0.x manifests are accepted but rendered as "unclassified").
+- `authority` is free-text and must be 2–200 characters. The registry trims surrounding whitespace before persisting.
+- The CLI's `xsil new` and the web wizard both prompt for these fields and refuse to scaffold a package without them.
+
+Tooling SHOULD surface `standardStatus` prominently in the package UI and group catalog statistics by it.
 
 ---
 
@@ -316,3 +341,4 @@ When published to the ExtenSilica registry:
 |---------|------|---------|
 | 1.0 | 2025-03 | Initial format: gzip-tar, `manifest.json`, layout `sim/`, `toolchain/`, `tests/`, `docs/`, optional `bitstream/`; fields `name`, `version`, `isa`, `entry`, `targets`, `toolchain`, `description`; targets `spike`, `qemu`, `fpga`. |
 | 2.0 | 2026-03 | Added required fields `author`, `checksums`; optional fields `license`, `repository`, `homepage`, `keywords`, `readme`, `testEntry`; added `assets/` directory; introduced `checksums` object superseding legacy `payloadHash`; added §8 Versioning, §9 Registry Integration; removed commercial/trust sections; clarified FPGA optionality and no-platform-board-catalog rule. |
+| 2.1 | 2026-05 | Added `standardStatus` and `authority` (§4.2 + §4.7) for honest classification of ratified / draft / vendor / research / custom extensions. Both fields are required by the registry and prompted for by `xsil new` and the web wizard. |

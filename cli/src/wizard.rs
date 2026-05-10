@@ -19,7 +19,13 @@ use anyhow::{bail, Context, Result};
 use crate::manager::ExtensionManager;
 use crate::types::{Manifest, ManifestChecksums};
 
-// ── Reserved slugs / formats ──────────────────────────────────────────────────
+// ── Reserved slugs / formats / standard-status values ────────────────────────
+
+/// Honest classification values, kept in sync with the registry's
+/// `StandardStatus` Prisma enum (`store-backend/prisma/schema.prisma`) and the
+/// frontend's `STANDARD_STATUS_VALUES`. Order matters for help output.
+const STANDARD_STATUS_VALUES: &[&str] =
+    &["ratified", "draft", "vendor", "research", "custom"];
 
 const RESERVED_SLUGS: &[&str] = &[
     "xsil", "extensilica", "registry", "store", "platform",
@@ -66,6 +72,10 @@ pub struct WizardArgs {
     pub license: Option<String>,
     pub repository: Option<String>,
     pub homepage: Option<String>,
+    /// Honest classification: one of `STANDARD_STATUS_VALUES`.
+    pub standard_status: Option<String>,
+    /// Free-text spec authority (e.g. "RISC-V International").
+    pub authority: Option<String>,
     pub instructions: Vec<WizardInstruction>,
     pub targets: WizardTargets,
 }
@@ -136,6 +146,29 @@ fn validate_format(s: &str) -> Result<()> {
         bail!("Format must be one of: R, I, S, B, U, J.");
     }
     Ok(())
+}
+
+fn normalize_standard_status(raw: &str) -> Result<String> {
+    let t = raw.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        bail!("standardStatus is required.");
+    }
+    if !STANDARD_STATUS_VALUES.contains(&t.as_str()) {
+        bail!(
+            "standardStatus must be one of: {} (got `{}`).",
+            STANDARD_STATUS_VALUES.join(", "),
+            raw,
+        );
+    }
+    Ok(t)
+}
+
+fn validate_authority(raw: &str) -> Result<String> {
+    let t = raw.trim().to_string();
+    if t.len() < 2 || t.len() > 200 {
+        bail!("authority must be between 2 and 200 characters.");
+    }
+    Ok(t)
 }
 
 // ── Identifier / encoding helpers (mirror of wizardGenerate.ts) ───────────────
@@ -313,7 +346,14 @@ fn write_file(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
 
-fn readme_template(slug: &str, description: &str, isa: &str, instructions: &[WizardInstruction]) -> String {
+fn readme_template(
+    slug: &str,
+    description: &str,
+    isa: &str,
+    instructions: &[WizardInstruction],
+    standard_status: &str,
+    authority: &str,
+) -> String {
     let ins_lines = if instructions.is_empty() {
         "_No custom instructions declared yet._".to_string()
     } else {
@@ -336,6 +376,9 @@ fn readme_template(slug: &str, description: &str, isa: &str, instructions: &[Wiz
 {description}
 
 **ISA:** `{isa}`
+
+**Standard status:** `{standard_status}`
+**Authority:** {authority}
 
 ## Run
 
@@ -1181,6 +1224,41 @@ fn collect_interactively(args: &mut WizardArgs) -> Result<()> {
         }
     }
 
+    println!("\n  Honest classification (required):");
+    println!("    ratified  — frozen RISC-V International specification");
+    println!("    draft     — working draft, not ratified yet");
+    println!("    vendor    — commercial vendor extension (T-Head, SiFive, …)");
+    println!("    research  — academic / experimental");
+    println!("    custom    — bespoke / one-off");
+    if args.standard_status.is_none() {
+        loop {
+            let s = prompt_line("Standard status", Some("custom"))?;
+            match normalize_standard_status(&s) {
+                Ok(v) => {
+                    args.standard_status = Some(v);
+                    break;
+                }
+                Err(e) => eprintln!("  ! {e}"),
+            }
+        }
+    }
+    if args.authority.is_none() {
+        let suggested = match args.standard_status.as_deref() {
+            Some("ratified") => Some("RISC-V International"),
+            _ => None,
+        };
+        loop {
+            let a = prompt_line("Authority (who defines the spec)", suggested)?;
+            match validate_authority(&a) {
+                Ok(v) => {
+                    args.authority = Some(v);
+                    break;
+                }
+                Err(e) => eprintln!("  ! {e}"),
+            }
+        }
+    }
+
     if args.instructions.is_empty() {
         if prompt_yes_no("Add custom instructions?", false)? {
             loop {
@@ -1302,6 +1380,23 @@ pub fn cmd_new(manager: &ExtensionManager, mut args: WizardArgs) -> Result<PathB
         }
     }
 
+    let standard_status = args
+        .standard_status
+        .as_ref()
+        .map(|s| s.as_str())
+        .ok_or_else(|| anyhow::anyhow!(
+            "standardStatus is required (use --standard-status in non-interactive mode)"
+        ))?;
+    let standard_status = normalize_standard_status(standard_status)?;
+    let authority = args
+        .authority
+        .as_ref()
+        .map(|s| s.as_str())
+        .ok_or_else(|| anyhow::anyhow!(
+            "authority is required (use --authority in non-interactive mode)"
+        ))?;
+    let authority = validate_authority(authority)?;
+
     for (idx, ins) in args.instructions.iter().enumerate() {
         if ins.mnemonic.trim().is_empty() {
             bail!("instructions[{idx}].mnemonic is required.");
@@ -1321,7 +1416,14 @@ pub fn cmd_new(manager: &ExtensionManager, mut args: WizardArgs) -> Result<PathB
     write_file(&root.join(".xsilignore"), XSILIGNORE)?;
     write_file(
         &root.join("README.md"),
-        &readme_template(&args.name, &description, &isa, &args.instructions),
+        &readme_template(
+            &args.name,
+            &description,
+            &isa,
+            &args.instructions,
+            &standard_status,
+            &authority,
+        ),
     )?;
     write_file(&root.join("CHANGELOG.md"), &changelog_template(&version))?;
     write_file(&root.join("LICENSE"), &license_template(&license, &author))?;
@@ -1430,6 +1532,8 @@ pub fn cmd_new(manager: &ExtensionManager, mut args: WizardArgs) -> Result<PathB
         license: Some(license),
         repository: Some(repository),
         homepage: args.homepage.clone().filter(|s| !s.trim().is_empty()),
+        standard_status: Some(standard_status),
+        authority: Some(authority),
         payload_hash: String::new(),
         checksums: Some(ManifestChecksums {
             payload: format!("sha256:{}", hash),
@@ -1466,6 +1570,8 @@ mod tests {
             license: Some("Apache-2.0".into()),
             repository: Some(format!("https://github.com/tester/{slug}")),
             homepage: None,
+            standard_status: Some("custom".into()),
+            authority: Some("CLI Test Authority".into()),
             instructions: vec![],
             targets: WizardTargets::default(),
         }
@@ -1744,6 +1850,68 @@ mod tests {
         let raw = fs::read_to_string(root.join("manifest.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["repository"], "https://gitlab.com/me/wiz-with-repo");
+    }
+
+    #[test]
+    fn rejects_missing_standard_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("xsil-home");
+        let mgr = ExtensionManager::new(home);
+        let parent = tmp.path().join("work");
+        fs::create_dir_all(&parent).unwrap();
+
+        let mut a = args_for("wiz-no-status", &parent);
+        a.standard_status = None;
+        assert!(cmd_new(&mgr, a).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_standard_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("xsil-home");
+        let mgr = ExtensionManager::new(home);
+        let parent = tmp.path().join("work");
+        fs::create_dir_all(&parent).unwrap();
+
+        let mut a = args_for("wiz-bad-status", &parent);
+        a.standard_status = Some("official".into());
+        assert!(cmd_new(&mgr, a).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_authority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("xsil-home");
+        let mgr = ExtensionManager::new(home);
+        let parent = tmp.path().join("work");
+        fs::create_dir_all(&parent).unwrap();
+
+        let mut a = args_for("wiz-no-authority", &parent);
+        a.authority = None;
+        assert!(cmd_new(&mgr, a).is_err());
+    }
+
+    #[test]
+    fn persists_standard_status_and_authority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("xsil-home");
+        let mgr = ExtensionManager::new(home);
+        let parent = tmp.path().join("work");
+        fs::create_dir_all(&parent).unwrap();
+
+        let mut a = args_for("wiz-classed", &parent);
+        a.standard_status = Some("ratified".into());
+        a.authority = Some("RISC-V International".into());
+        let root = cmd_new(&mgr, a).expect("cmd_new");
+
+        let raw = fs::read_to_string(root.join("manifest.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["standardStatus"], "ratified");
+        assert_eq!(v["authority"], "RISC-V International");
+
+        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        assert!(readme.contains("**Standard status:** `ratified`"));
+        assert!(readme.contains("**Authority:** RISC-V International"));
     }
 
     #[test]
