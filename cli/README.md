@@ -29,6 +29,11 @@ The fastest way to start. The wizard asks for:
 
 - package name, version, ISA base (e.g. `RV64GC`), license
 - repository URL (mandatory)
+- **honest classification**: `standardStatus` (`ratified` | `draft` |
+  `vendor` | `research` | `custom`) and free-text `authority` (e.g.
+  *RISC-V International*, *T-Head / XuanTie*, *University of Michigan*).
+  Both are mandatory. Don't label a package `ratified` unless RISC-V
+  International has actually frozen the spec — the registry checks.
 - one or more custom instructions: mnemonic, format (R/I/S/B/U/J),
   opcode, `funct3`, `funct7`, operands, summary
 
@@ -42,7 +47,28 @@ It then generates a ready-to-build `.xsil` tree:
 - `sim/spike-extension/` — Spike `extension_t` C++ skeleton + Makefile + README
 - `toolchain/`, `LICENSE` (full SPDX text), `CHANGELOG.md`, `README.md`
 
-Prefer non-interactive? Use `xsil init <name>` for a minimal scaffold.
+Prefer non-interactive? Use `xsil init <name>` for a minimal scaffold,
+or pass `xsil new` the same fields as flags:
+
+```bash
+xsil new my-ext \
+  --description "What it does, in one line." \
+  --isa     "RV64G_Zbkb" \
+  --license "Apache-2.0" \
+  --repository      "https://github.com/you/my-ext" \
+  --standard-status "vendor" \
+  --authority       "ACME Corp."
+```
+
+## What `xsil` does **not** touch
+
+A package's **provenance** on a registry — whether it was auto-seeded
+from upstream, ported by the community, claimed by the maintainer, or
+admin-verified as official — is tracked server-side in a separate
+`portStatus` field. The CLI does not read or write it; the registry
+sets it for you (see spec §4.8). This is intentional: it prevents
+publishers from misrepresenting themselves as the official upstream
+maintainer.
 
 ## What is `.xsil`?
 
