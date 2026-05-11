@@ -5,7 +5,40 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use colored::*;
 
-use crate::types::{RegistryPackage, ResolveArtifactsResponse, UserProfile};
+use crate::types::{ApiTokenRow, RegistryPackage, ResolveArtifactsResponse, UserProfile};
+
+/// Best-effort local hostname, used as the default label when `xsil login`
+/// creates a new ApiToken on the registry. Avoids pulling a new crate by
+/// reading the usual platform sources in order of reliability.
+fn local_hostname() -> String {
+    if let Ok(h) = std::env::var("HOSTNAME") {
+        let h = h.trim();
+        if !h.is_empty() {
+            return h.to_string();
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string("/etc/hostname") {
+        let h = s.trim();
+        if !h.is_empty() {
+            return h.to_string();
+        }
+    }
+    if let Ok(out) = std::process::Command::new("hostname").output() {
+        if out.status.success() {
+            let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+    }
+    "device".to_string()
+}
+
+/// Default token label for `xsil login` — distinguishes CLI sessions from
+/// browser sessions in the `/dashboard/tokens` UI.
+pub fn default_cli_token_name() -> String {
+    format!("xsil-cli @ {}", local_hostname())
+}
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -89,9 +122,14 @@ impl RegistryClient {
 
     // ── Auth endpoints ────────────────────────────────────────────────────────
 
-    /// Interactive login: prompts for email + password, calls POST /auth/login,
+    /// Interactive login: prompts for email + password, calls POST /auth/login
+    /// with a token name derived from the hostname (or the caller's override),
     /// and stores the returned token in the config file.
-    pub fn login(&self) -> Result<()> {
+    ///
+    /// `name_override` lets `xsil login --name "ci-runner"` mint a token with a
+    /// custom label so the user can recognise it in `/dashboard/tokens`. When
+    /// `None`, we default to `xsil-cli @ <hostname>`.
+    pub fn login(&self, name_override: Option<&str>) -> Result<()> {
         print!("Email: ");
         std::io::stdout().flush()?;
         let mut email = String::new();
@@ -103,7 +141,16 @@ impl RegistryClient {
         // Read password without echoing it to the terminal.
         let password = rpassword::read_password().context("Failed to read password")?;
 
-        let body = serde_json::json!({ "email": email, "password": password });
+        let token_name = name_override
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(default_cli_token_name);
+
+        let body = serde_json::json!({
+            "email": email,
+            "password": password,
+            "name": token_name,
+        });
         let resp = self
             .client
             .post(format!("{}/auth/login", self.base_url))
@@ -136,7 +183,12 @@ impl RegistryClient {
         cfg.token = Some(token);
         save_config(&cfg)?;
 
-        println!("{} Logged in as {}.", "✔".green(), username.bold());
+        println!(
+            "{} Logged in as {} (token: {}).",
+            "✔".green(),
+            username.bold(),
+            token_name.dimmed()
+        );
         Ok(())
     }
 
@@ -164,6 +216,105 @@ impl RegistryClient {
 
         println!("{} Logged out.", "✔".green());
         Ok(())
+    }
+
+    /// Call GET /auth/me/tokens and return the user's full token list (live + revoked, newest first).
+    pub fn list_tokens(&self) -> Result<Vec<ApiTokenRow>> {
+        let auth = self
+            .auth_header()
+            .context("Not logged in. Run `xsil login` first.")?;
+
+        let resp = self
+            .client
+            .get(format!("{}/auth/me/tokens", self.base_url))
+            .header("Authorization", auth)
+            .send()
+            .context("Failed to reach the registry")?;
+
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().context("Invalid response")?;
+
+        if !status.is_success() {
+            bail!(
+                "{}",
+                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to list tokens")
+            );
+        }
+
+        let tokens = json
+            .get("tokens")
+            .cloned()
+            .context("Missing `tokens` array in response")?;
+        let rows: Vec<ApiTokenRow> =
+            serde_json::from_value(tokens).context("Failed to parse tokens array")?;
+        Ok(rows)
+    }
+
+    /// Call POST /auth/me/tokens with a name. Returns the raw token (shown ONCE)
+    /// alongside the persisted row's metadata.
+    pub fn create_token(&self, name: &str) -> Result<(String, ApiTokenRow)> {
+        let auth = self
+            .auth_header()
+            .context("Not logged in. Run `xsil login` first.")?;
+
+        let body = serde_json::json!({ "name": name });
+        let resp = self
+            .client
+            .post(format!("{}/auth/me/tokens", self.base_url))
+            .header("Authorization", auth)
+            .json(&body)
+            .send()
+            .context("Failed to reach the registry")?;
+
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().context("Invalid response")?;
+
+        if !status.is_success() {
+            bail!(
+                "{}",
+                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to create token")
+            );
+        }
+
+        let raw = json
+            .get("token")
+            .and_then(|v| v.as_str())
+            .context("Missing `token` (raw) in response")?
+            .to_string();
+        let row: ApiTokenRow = serde_json::from_value(
+            json.get("apiToken").cloned().context("Missing `apiToken` in response")?,
+        )
+        .context("Failed to parse apiToken row")?;
+        Ok((raw, row))
+    }
+
+    /// Call DELETE /auth/me/tokens/:id. Idempotent — already-revoked tokens return 200.
+    pub fn revoke_token(&self, id: u32) -> Result<bool> {
+        let auth = self
+            .auth_header()
+            .context("Not logged in. Run `xsil login` first.")?;
+
+        let resp = self
+            .client
+            .delete(format!("{}/auth/me/tokens/{}", self.base_url, id))
+            .header("Authorization", auth)
+            .send()
+            .context("Failed to reach the registry")?;
+
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
+
+        if !status.is_success() {
+            bail!(
+                "{}",
+                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to revoke token")
+            );
+        }
+
+        Ok(json
+            .get("alreadyRevoked")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
     }
 
     /// Call GET /auth/me and return the authenticated user's profile.
