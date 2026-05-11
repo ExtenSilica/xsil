@@ -47,6 +47,12 @@ xsil run examples/rvx-demo
 
 # Publish (dry run first)
 xsil publish ./my-extension --dry-run
+
+# Manage API tokens (one credential per device, CLI install, or bot)
+xsil login --name "xsil-cli @ my-laptop"
+xsil token list
+xsil token create "ci-runner"
+xsil token revoke 7
 ```
 
 ## License
