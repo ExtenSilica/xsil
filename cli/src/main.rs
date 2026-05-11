@@ -46,13 +46,31 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Authenticate with the registry (stores an API token locally)
-    Login,
+    ///
+    /// The CLI now creates a *named* API token on each login so you can see it
+    /// in `/dashboard/tokens` and revoke it individually. Other devices /
+    /// browser sessions for the same account keep working. Default name:
+    /// `xsil-cli @ <hostname>`.
+    Login {
+        /// Override the token label shown in /dashboard/tokens.
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+    },
 
     /// Invalidate the current API token and clear local credentials
     Logout,
 
     /// Print the currently authenticated user
     Whoami,
+
+    /// Manage API tokens (list, create, revoke)
+    ///
+    /// Each user can hold many independent tokens — one per device, CLI
+    /// install, or bot. Revoking one does not affect the others.
+    Token {
+        #[command(subcommand)]
+        action: TokenCommand,
+    },
 
     /// Publish a package to the registry
     ///
@@ -203,6 +221,24 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum TokenCommand {
+    /// List every API token on the current account (live and revoked)
+    List,
+
+    /// Create a new named API token. The raw value is printed once.
+    Create {
+        /// Human-recognisable label shown in /dashboard/tokens (1–80 chars)
+        name: String,
+    },
+
+    /// Revoke an API token by id (find it with `xsil token list`)
+    Revoke {
+        /// Numeric id of the token to revoke
+        id: u32,
+    },
+}
+
 // ── Entry points ──────────────────────────────────────────────────────────────
 
 fn main() {
@@ -234,8 +270,8 @@ fn run() -> Result<()> {
 
     match &cli.command {
         // ── Auth commands ─────────────────────────────────────────────────────
-        Commands::Login => {
-            registry.login()?;
+        Commands::Login { name } => {
+            registry.login(name.as_deref())?;
         }
 
         Commands::Logout => {
@@ -254,6 +290,10 @@ fn run() -> Result<()> {
             if let Some(created) = &user.created_at {
                 println!("  Member since : {}", created);
             }
+        }
+
+        Commands::Token { action } => {
+            cmd_token(&registry, action)?;
         }
 
         // ── Publish ───────────────────────────────────────────────────────────
@@ -453,6 +493,83 @@ fn run() -> Result<()> {
 }
 
 // ── Command implementations ───────────────────────────────────────────────────
+
+fn cmd_token(registry: &RegistryClient, action: &TokenCommand) -> Result<()> {
+    match action {
+        TokenCommand::List => {
+            let rows = registry.list_tokens()?;
+            if rows.is_empty() {
+                println!("No tokens. Run `xsil token create <name>` to mint one.");
+                return Ok(());
+            }
+            let (live, revoked): (Vec<_>, Vec<_>) =
+                rows.iter().partition(|r| r.revoked_at.is_none());
+
+            println!("{}", "Active tokens".bold());
+            print_token_table(&live);
+            if !revoked.is_empty() {
+                println!();
+                println!("{}", "Revoked tokens".dimmed());
+                print_token_table(&revoked);
+            }
+        }
+        TokenCommand::Create { name } => {
+            let (raw, row) = registry.create_token(name)?;
+            println!("{} Created token {} (id {}).", "✔".green(), row.name.bold(), row.id);
+            println!();
+            println!("  {}", "Copy this token NOW — it will not be shown again:".yellow());
+            println!("    {}", raw.bold());
+            println!();
+            println!("  {}", "Use it with the CLI on another machine:".dimmed());
+            println!("    xsil login --name \"{}\"  # to mint a separate token interactively", row.name);
+            println!("    # or paste the raw value into ~/.config/xsil/config.json");
+        }
+        TokenCommand::Revoke { id } => {
+            let already = registry.revoke_token(*id)?;
+            if already {
+                println!("{} Token #{} was already revoked.", "i".cyan(), id);
+            } else {
+                println!("{} Revoked token #{}.", "✔".green(), id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_token_table(rows: &[&types::ApiTokenRow]) {
+    println!(
+        "  {:<6} {:<32} {:<22} {:<22}",
+        "id".dimmed(),
+        "name".dimmed(),
+        "created".dimmed(),
+        "last used".dimmed(),
+    );
+    for row in rows {
+        println!(
+            "  {:<6} {:<32} {:<22} {:<22}",
+            row.id,
+            truncate_for_display(&row.name, 32),
+            short_iso(&row.created_at),
+            row.last_used_at.as_deref().map(short_iso).unwrap_or_else(|| "—".to_string()),
+        );
+    }
+}
+
+fn truncate_for_display(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+/// Trim an ISO-8601 timestamp to "YYYY-MM-DD HH:MM" for the token table.
+fn short_iso(iso: &str) -> String {
+    let cleaned = iso.replace('T', " ");
+    cleaned.split('.').next().unwrap_or(iso).to_string()
+}
 
 fn cmd_publish(
     registry: &RegistryClient,

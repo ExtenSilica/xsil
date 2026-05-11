@@ -212,6 +212,22 @@ pub struct UserProfile {
     pub created_at: Option<String>,
 }
 
+/// Public shape of an `ApiToken` row returned by `GET /auth/me/tokens` and
+/// `POST /auth/me/tokens` (under `apiToken`). The raw token value is NEVER in
+/// this struct — the server keeps only the hash, so `POST` returns the raw
+/// value once in a sibling `token` field.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiTokenRow {
+    pub id: u32,
+    pub name: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "lastUsedAt")]
+    pub last_used_at: Option<String>,
+    #[serde(rename = "revokedAt")]
+    pub revoked_at: Option<String>,
+}
+
 // ── Artifact resolution API (resolved-mode tool dependencies) ─────────────────
 
 #[derive(Debug, Deserialize)]
