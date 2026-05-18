@@ -89,6 +89,7 @@ extension. The format spec lives at
 | `xsil publish <path>` | Upload a `.xsil` to the configured registry |
 | `xsil login` | Authenticate against the registry |
 | `xsil search <query>` | Search the registry |
+| `xsil request …` | File and browse implementation requests (coordination, no payments) |
 
 The hosted registry, web UI, and an equivalent web wizard are at
 <https://extensilica.com>.

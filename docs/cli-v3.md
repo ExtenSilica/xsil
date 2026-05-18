@@ -295,6 +295,46 @@ xsil search "vector extension" --limit 20
 
 ---
 
+### `xsil request`
+
+Coordinate **open technical work** on registry packages (implementation requests).
+No on-platform payments — optional `fundingContactEmail` / `fundingNote` only.
+
+```bash
+xsil request create rvx-demo \
+  --title "Spike runnable demo with CI" \
+  --description "We need a community port that passes xsil test and documents build steps for reviewers."
+
+xsil request open 42
+xsil request list --status open --capability vector
+xsil request list rvx-demo
+xsil request show 42
+xsil request mine
+xsil request interest 42 --message "I can deliver in two weeks."
+xsil request cancel 42
+```
+
+| Subcommand | Auth | Purpose |
+|------------|------|---------|
+| `create <package>` | Required | Create a **draft** request on a package |
+| `open <id>` | Required | Transition `draft` → `open` |
+| `list` | Optional | Catalog (`--status`, `--capability`) |
+| `list <package>` | Optional | Requests visible on one package |
+| `show <id>` | Optional | Full detail (404 if not visible) |
+| `mine` | Required | Your created, assigned, or interested requests |
+| `interest <id>` | Required | Express implementer interest |
+| `cancel <id>` | Required | Cancel when your role allows |
+
+**`create` flags:** `--title`, `--description` or `--description-file`,
+`--visibility` (`public` \| `org_only` \| `unlisted`), `--target-capability`,
+`--acceptance-criteria` / `--acceptance-file`, `--funding-email`, `--funding-note`,
+`--org-id`.
+
+The CLI rejects bodies containing payment-shaped fields (`amount`, `wallet`,
+`escrow`, `usdc`, …) before calling the registry.
+
+---
+
 ## Package Argument Formats
 
 All commands that accept a `<package>` argument support four input forms:

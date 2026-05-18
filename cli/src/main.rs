@@ -19,6 +19,7 @@ mod init;
 mod wizard;
 mod constants;
 mod resolver;
+mod request;
 
 use registry::RegistryClient;
 use manager::ExtensionManager;
@@ -218,6 +219,95 @@ enum Commands {
         /// Restore (un-yank) the version instead of yanking it
         #[arg(long)]
         restore: bool,
+    },
+
+    /// Implementation coordination — request work on a package (no on-platform payments)
+    ///
+    /// Funding, if any, is off-platform via optional contact fields only.
+    Request {
+        #[command(subcommand)]
+        action: RequestCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum RequestCommand {
+    /// Create a draft implementation request on a package
+    Create {
+        /// Package slug or scoped name (`@scope/pkg`)
+        package: String,
+
+        #[arg(long, value_name = "TEXT")]
+        title: String,
+
+        /// Request body (min 50 characters). Use --description-file for long text.
+        #[arg(long, value_name = "TEXT")]
+        description: String,
+
+        #[arg(long = "description-file", value_name = "PATH")]
+        description_file: Option<PathBuf>,
+
+        #[arg(long, default_value = "public", value_parser = ["public", "org_only", "unlisted"])]
+        visibility: String,
+
+        #[arg(long = "target-capability", value_name = "TEXT")]
+        target_capability: Option<String>,
+
+        #[arg(long = "acceptance-criteria", value_name = "TEXT")]
+        acceptance_criteria: Option<String>,
+
+        #[arg(long = "acceptance-file", value_name = "PATH")]
+        acceptance_file: Option<PathBuf>,
+
+        #[arg(long = "funding-email", value_name = "EMAIL")]
+        funding_email: Option<String>,
+
+        #[arg(long = "funding-note", value_name = "TEXT")]
+        funding_note: Option<String>,
+
+        /// File on behalf of an organization (must be a member)
+        #[arg(long = "org-id", value_name = "ID")]
+        org_id: Option<u32>,
+    },
+
+    /// List implementation requests (catalog or per-package)
+    List {
+        /// When set, list requests for this package only
+        #[arg(value_name = "PACKAGE")]
+        package: Option<String>,
+
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+
+        /// Substring match on targetCapability (catalog list only)
+        #[arg(long, value_name = "TEXT")]
+        capability: Option<String>,
+    },
+
+    /// Show one request by id
+    Show {
+        id: u32,
+    },
+
+    /// List requests you created, are assigned to, or expressed interest in
+    Mine,
+
+    /// Publish a draft request as open (accepting implementer interest)
+    Open {
+        id: u32,
+    },
+
+    /// Cancel a request you can edit
+    Cancel {
+        id: u32,
+    },
+
+    /// Express interest in implementing an open request
+    Interest {
+        id: u32,
+
+        #[arg(long, value_name = "TEXT")]
+        message: Option<String>,
     },
 }
 
@@ -486,6 +576,72 @@ fn run() -> Result<()> {
         // ── Yank ──────────────────────────────────────────────────────────────
         Commands::Yank { package_version, reason, restore } => {
             cmd_yank(&registry, package_version, reason.as_deref(), *restore)?;
+        }
+
+        Commands::Request { action } => {
+            match action {
+                RequestCommand::Create {
+                    package,
+                    title,
+                    description,
+                    description_file,
+                    visibility,
+                    target_capability,
+                    acceptance_criteria,
+                    acceptance_file,
+                    funding_email,
+                    funding_note,
+                    org_id,
+                } => {
+                    request::cmd_create(
+                        &registry,
+                        package,
+                        title,
+                        description,
+                        description_file.as_deref(),
+                        visibility,
+                        target_capability.as_deref(),
+                        acceptance_criteria.as_deref(),
+                        acceptance_file.as_deref(),
+                        funding_email.as_deref(),
+                        funding_note.as_deref(),
+                        *org_id,
+                        cli.dry_run,
+                    )?;
+                }
+                RequestCommand::List {
+                    package,
+                    status,
+                    capability,
+                } => {
+                    request::cmd_list(
+                        &registry,
+                        package.as_deref(),
+                        status.as_deref(),
+                        capability.as_deref(),
+                    )?;
+                }
+                RequestCommand::Show { id } => {
+                    request::cmd_show(&registry, *id)?;
+                }
+                RequestCommand::Mine => {
+                    request::cmd_mine(&registry)?;
+                }
+                RequestCommand::Open { id } => {
+                    request::cmd_open(&registry, *id, cli.dry_run)?;
+                }
+                RequestCommand::Cancel { id } => {
+                    request::cmd_cancel(&registry, *id, cli.dry_run)?;
+                }
+                RequestCommand::Interest { id, message } => {
+                    request::cmd_interest(
+                        &registry,
+                        *id,
+                        message.as_deref(),
+                        cli.dry_run,
+                    )?;
+                }
+            }
         }
     }
 

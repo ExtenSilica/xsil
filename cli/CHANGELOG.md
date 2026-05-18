@@ -4,6 +4,28 @@ All notable changes to the `xsil` CLI. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-05-17
+
+### Added
+
+- New `xsil request` subcommand for **implementation coordination** (Phase C):
+  - `xsil request create <package>` — file a draft request (`--title`,
+    `--description` or `--description-file`, optional funding contact fields).
+  - `xsil request list` — browse open requests (`--status`, `--capability`).
+  - `xsil request list <package>` — requests on one package.
+  - `xsil request show <id>` — full request detail.
+  - `xsil request mine` — your created, assigned, or interested requests.
+  - `xsil request open <id>` — publish a draft as open.
+  - `xsil request cancel <id>` — cancel when permitted.
+  - `xsil request interest <id>` — express implementer interest (`--message`).
+- Client-side guard rejects structured payment fields (`amount`, `wallet`,
+  `escrow`, etc.) before any API call — mirrors the registry policy.
+
+### Compatibility
+
+- Requires a registry with implementation coordination endpoints (ExtenSilica
+  Phase C, deployed on `api.extensilica.com`). Older registries return `404`.
+
 ## [0.2.2] — 2026-05-11
 
 ### Added

@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use colored::*;
 
-use crate::types::{ApiTokenRow, RegistryPackage, ResolveArtifactsResponse, UserProfile};
+use crate::types::{
+    ApiTokenRow, ImplementationRequest, RegistryPackage, ResolveArtifactsResponse, UserProfile,
+};
 
 /// Best-effort local hostname, used as the default label when `xsil login`
 /// creates a new ApiToken on the registry. Avoids pulling a new crate by
@@ -346,6 +348,151 @@ impl RegistryClient {
         .context("Failed to parse user profile")?;
 
         Ok(user)
+    }
+
+    fn registry_error(json: &serde_json::Value, fallback: &str) -> String {
+        json.get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or(fallback)
+            .to_string()
+    }
+
+    fn registry_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        require_auth: bool,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self.client.request(method, url);
+        if require_auth {
+            let auth = self
+                .auth_header()
+                .context("Not logged in. Run `xsil login` first.")?;
+            req = req.header("Authorization", auth);
+        } else if let Some(auth) = self.auth_header() {
+            req = req.header("Authorization", auth);
+        }
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+
+        let resp = req.send().context("Failed to reach the registry")?;
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().context("Invalid response from registry")?;
+
+        if !status.is_success() {
+            bail!("{}", Self::registry_error(&json, "Registry request failed"));
+        }
+        Ok(json)
+    }
+
+    fn authed_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        self.registry_json(method, path, body, true)
+    }
+
+    // ── Implementation coordination ───────────────────────────────────────────
+
+    pub fn list_implementation_requests(
+        &self,
+        status: Option<&str>,
+        capability: Option<&str>,
+    ) -> Result<Vec<ImplementationRequest>> {
+        let mut path = String::from("/implementation-requests");
+        let mut qs = Vec::new();
+        if let Some(s) = status.map(str::trim).filter(|s| !s.is_empty()) {
+            qs.push(format!("status={}", urlencoding::encode(s)));
+        }
+        if let Some(c) = capability.map(str::trim).filter(|s| !s.is_empty()) {
+            qs.push(format!("capability={}", urlencoding::encode(c)));
+        }
+        if !qs.is_empty() {
+            path.push('?');
+            path.push_str(&qs.join("&"));
+        }
+
+        let json = self.registry_json(reqwest::Method::GET, &path, None, false)?;
+        let requests = json
+            .get("requests")
+            .cloned()
+            .context("Missing `requests` in response")?;
+        serde_json::from_value(requests).context("Failed to parse implementation requests")
+    }
+
+    pub fn list_package_implementation_requests(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<ImplementationRequest>> {
+        let path = format!("/packages/{}/implementation-requests", slug);
+        let json = self.registry_json(reqwest::Method::GET, &path, None, false)?;
+        let requests = json
+            .get("requests")
+            .cloned()
+            .context("Missing `requests` in response")?;
+        serde_json::from_value(requests).context("Failed to parse implementation requests")
+    }
+
+    pub fn get_implementation_request(&self, id: u32) -> Result<ImplementationRequest> {
+        let path = format!("/implementation-requests/{id}");
+        let json = self.registry_json(reqwest::Method::GET, &path, None, false)?;
+        let request = json
+            .get("request")
+            .cloned()
+            .context("Missing `request` in response")?;
+        serde_json::from_value(request).context("Failed to parse implementation request")
+    }
+
+    pub fn create_implementation_request(
+        &self,
+        slug: &str,
+        body: &serde_json::Value,
+    ) -> Result<ImplementationRequest> {
+        let path = format!("/packages/{slug}/implementation-requests");
+        let json = self.authed_json(reqwest::Method::POST, &path, Some(body))?;
+        let request = json
+            .get("request")
+            .cloned()
+            .context("Missing `request` in response")?;
+        serde_json::from_value(request).context("Failed to parse implementation request")
+    }
+
+    pub fn patch_implementation_request(
+        &self,
+        id: u32,
+        body: &serde_json::Value,
+    ) -> Result<ImplementationRequest> {
+        let path = format!("/implementation-requests/{id}");
+        let json = self.authed_json(reqwest::Method::PATCH, &path, Some(body))?;
+        let request = json
+            .get("request")
+            .cloned()
+            .context("Missing `request` in response")?;
+        serde_json::from_value(request).context("Failed to parse implementation request")
+    }
+
+    pub fn create_implementation_interest(
+        &self,
+        id: u32,
+        body: &serde_json::Value,
+    ) -> Result<()> {
+        let path = format!("/implementation-requests/{id}/interests");
+        self.authed_json(reqwest::Method::POST, &path, Some(body))?;
+        Ok(())
+    }
+
+    pub fn list_my_implementation_requests(&self) -> Result<Vec<ImplementationRequest>> {
+        let json = self.authed_json(reqwest::Method::GET, "/me/implementation-requests", None)?;
+        let requests = json
+            .get("requests")
+            .cloned()
+            .context("Missing `requests` in response")?;
+        serde_json::from_value(requests).context("Failed to parse implementation requests")
     }
 
     // ── Package publish ───────────────────────────────────────────────────────

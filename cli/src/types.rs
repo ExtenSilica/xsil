@@ -253,6 +253,85 @@ pub struct ResolveArtifactsResponse {
     pub missing: Vec<MissingToolArtifact>,
 }
 
+// ── Implementation coordination (Phase C) ─────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImplementationPackageSummary {
+    pub id: u32,
+    pub slug: String,
+    pub name: String,
+    #[serde(rename = "ownerId", default)]
+    pub owner_id: Option<u32>,
+    #[serde(rename = "orgId", default)]
+    pub org_id: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImplementationUserSummary {
+    pub id: u32,
+    pub username: String,
+    #[serde(rename = "avatarUrl", default)]
+    pub avatar_url: Option<String>,
+    #[serde(rename = "implementerGithubUrl", default)]
+    pub implementer_github_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImplementationOrgSummary {
+    pub id: u32,
+    pub slug: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+}
+
+/// Implementation request returned by the registry coordination API.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImplementationRequest {
+    pub id: u32,
+    #[serde(rename = "packageId")]
+    pub package_id: u32,
+    #[serde(rename = "createdByUserId")]
+    pub created_by_user_id: u32,
+    #[serde(rename = "createdByOrgId", default)]
+    pub created_by_org_id: Option<u32>,
+    pub title: String,
+    pub description: String,
+    pub visibility: String,
+    pub status: String,
+    #[serde(rename = "targetCapability", default)]
+    pub target_capability: Option<String>,
+    #[serde(rename = "acceptanceCriteriaSummary", default)]
+    pub acceptance_criteria_summary: Option<String>,
+    #[serde(rename = "fundingContactEmail", default)]
+    pub funding_contact_email: Option<String>,
+    #[serde(rename = "fundingNote", default)]
+    pub funding_note: Option<String>,
+    #[serde(rename = "assignedImplementerUserId", default)]
+    pub assigned_implementer_user_id: Option<u32>,
+    #[serde(rename = "openedAt", default)]
+    pub opened_at: Option<String>,
+    #[serde(rename = "completedAt", default)]
+    pub completed_at: Option<String>,
+    #[serde(rename = "cancelledAt", default)]
+    pub cancelled_at: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+    #[serde(default)]
+    pub package: Option<ImplementationPackageSummary>,
+    #[serde(rename = "createdBy", default)]
+    pub created_by: Option<ImplementationUserSummary>,
+    #[serde(rename = "createdByOrg", default)]
+    pub created_by_org: Option<ImplementationOrgSummary>,
+    #[serde(rename = "assignedImplementer", default)]
+    pub assigned_implementer: Option<ImplementationUserSummary>,
+    #[serde(rename = "interestCount", default)]
+    pub interest_count: u32,
+    #[serde(rename = "submissionCount", default)]
+    pub submission_count: u32,
+}
+
 // ── Local install state ───────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]

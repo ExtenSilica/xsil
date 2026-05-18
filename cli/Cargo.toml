@@ -1,6 +1,6 @@
 [package]
 name = "xsil"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 rust-version = "1.74"
 description = "Reference CLI for the .xsil RISC-V ISA extension package format. Scaffold, build, run, test and publish custom RISC-V instruction packages."
