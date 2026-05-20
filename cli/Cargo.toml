@@ -1,6 +1,6 @@
 [package]
 name = "xsil"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 rust-version = "1.74"
 # MSRV note: keep clap/clap_lex pinned — unpinned `clap = "4.4"` can resolve to
@@ -51,6 +51,8 @@ time       = "=0.3.36"
 deranged   = "=0.3.11"
 native-tls = "=0.2.11"
 indexmap   = "=2.2.6"
+openssl    = "=0.10.78"  # 0.10.79+ raises MSRV to 1.80 (Ubuntu 22.04 stock = 1.75)
+openssl-sys = "=0.9.114" # 0.9.115+ raises MSRV to 1.80 (paired with the openssl pin)
 
 [dev-dependencies]
 tempfile = "3.27.0"

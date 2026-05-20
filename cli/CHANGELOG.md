@@ -4,6 +4,23 @@ All notable changes to the `xsil` CLI. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] — 2026-05-14
+
+### Fixed
+
+- Pin `openssl = "=0.10.78"`. `openssl 0.10.79+` raises MSRV to **1.80**,
+  which Ubuntu 22.04 / Debian 12 don't ship. With this pin, an unlocked
+  `cargo install xsil` still resolves an openssl that compiles on Rust 1.74+.
+- README now recommends `cargo install --locked xsil` as the canonical
+  install. The bundled `Cargo.lock` already pins everything to a known-good
+  set; `--locked` makes Cargo honor it instead of re-resolving the dep graph.
+
+### Notes
+
+- This is the third "transitive dep MSRV creep" patch in the 0.2.x line.
+  Going forward, expect `--locked` to be the recommended install path so
+  we don't need to chase every dependency MSRV bump.
+
 ## [0.2.5] — 2026-05-14
 
 ### Fixed
