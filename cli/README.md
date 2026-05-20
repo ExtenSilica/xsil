@@ -16,12 +16,24 @@ xsil run ./my-ext   # build + run inside the generated package
 
 ## Install
 
+**Recommended** — prebuilt binary (no Rust toolchain required):
+
 ```bash
-cargo install xsil
+curl -fsSL https://extensilica.com/install.sh | sh
 ```
 
-Or grab a prebuilt binary from
-[GitHub Releases](https://github.com/ExtenSilica/xsil/releases).
+Or from [GitHub Releases](https://github.com/ExtenSilica/xsil/releases).
+
+**From source** — needs a recent Rust toolchain (`rustup` stable; Ubuntu `apt install cargo` is often too old for unpinned builds):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustup update stable
+cargo install xsil --locked
+```
+
+Use `--locked` so dependency versions match the crate’s `Cargo.lock`.
 
 ## `xsil new` — interactive wizard
 

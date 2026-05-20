@@ -1,8 +1,10 @@
 [package]
 name = "xsil"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 rust-version = "1.74"
+# MSRV note: keep clap/clap_lex pinned — unpinned `clap = "4.4"` can resolve to
+# clap_lex 1.1+ which needs Rust 1.85+ (edition2024).
 description = "Reference CLI for the .xsil RISC-V ISA extension package format. Scaffold, build, run, test and publish custom RISC-V instruction packages."
 license = "ISC"
 readme = "README.md"
@@ -19,7 +21,8 @@ exclude = [
 ]
 
 [dependencies]
-clap       = { version = "4.4",     features = ["derive"] }
+clap       = { version = "=4.5.53", features = ["derive"] }
+clap_lex   = "=0.7.6"
 colored    = "2.1"
 indicatif  = "0.17"
 directories = "5.0"

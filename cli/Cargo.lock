@@ -1946,11 +1946,12 @@ dependencies = [
 
 [[package]]
 name = "xsil"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "clap_lex",
  "colored",
  "deranged",
  "directories",
