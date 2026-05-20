@@ -4,6 +4,28 @@ All notable changes to the `xsil` CLI. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-05-14
+
+### Fixed
+
+- Pin `rpassword` to `~7.4` so `cargo install xsil` keeps building on
+  Cargo 1.75 (Ubuntu 22.04 / Debian 12 default). `rpassword 7.5.x`
+  bumped its edition to `2024`, which requires Cargo ≥ 1.85 and broke
+  the install on stable distros.
+
+### Compatibility
+
+- No behavior change. The 7.4 line is API-compatible with 7.3 — affected
+  only the lockfile selection.
+
+## [0.2.4] — 2026-05-13
+
+### Fixed
+
+- Pin `clap = "=4.5.53"` and `clap_lex = "=0.7.6"`. Newer clap minor
+  releases require `edition2024`, which is unavailable on Cargo 1.75
+  (Ubuntu 22.04 stock).
+
 ## [0.2.3] — 2026-05-17
 
 ### Added
