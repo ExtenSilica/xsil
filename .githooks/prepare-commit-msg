@@ -1,0 +1,8 @@
+#!/bin/sh
+# Strip Cursor co-author trailers (workspace policy).
+case "$2" in
+  merge|squash) exit 0 ;;
+esac
+if [ -f "$1" ]; then
+  sed -i '/^Co-authored-by: Cursor <cursoragent@cursor.com>/d' "$1"
+fi
