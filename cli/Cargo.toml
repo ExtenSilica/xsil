@@ -1,11 +1,11 @@
 [package]
 name = "xsil"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 rust-version = "1.74"
 # MSRV note: keep clap/clap_lex pinned — unpinned `clap = "4.4"` can resolve to
 # clap_lex 1.1+ which needs Rust 1.85+ (edition2024).
-description = "Reference CLI for the .xsil RISC-V ISA extension package format. Scaffold, build, run, test and publish custom RISC-V instruction packages."
+description = "Reference CLI for the .xsil RISC-V ISA extension package format — used to create, validate, package, test, run, and publish custom RISC-V instruction extensions."
 license = "ISC"
 readme = "README.md"
 repository = "https://github.com/ExtenSilica/xsil"
@@ -29,7 +29,7 @@ directories = "5.0"
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow     = "1.0"
-reqwest    = { version = "=0.11.23", features = ["blocking", "json", "multipart"] }
+reqwest    = { version = "=0.11.23", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
 tar        = "0.4"
 flate2     = "1.0"
 sha2       = "0.10"
@@ -49,10 +49,10 @@ rpassword  = "~7.4"
 # Pinned transitive deps (keep versions that compile cleanly together)
 time       = "=0.3.36"
 deranged   = "=0.3.11"
-native-tls = "=0.2.11"
 indexmap   = "=2.2.6"
-openssl    = "=0.10.78"  # 0.10.79+ raises MSRV to 1.80 (Ubuntu 22.04 stock = 1.75)
-openssl-sys = "=0.9.114" # 0.9.115+ raises MSRV to 1.80 (paired with the openssl pin)
+# native-tls / openssl / openssl-sys are intentionally NOT pinned (and not
+# pulled in at all) since 0.2.7 — reqwest is configured with rustls-tls
+# instead, eliminating the libssl-dev / pkg-config / OpenSSL-MSRV chain.
 
 [dev-dependencies]
 tempfile = "3.27.0"

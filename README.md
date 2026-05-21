@@ -15,15 +15,18 @@ Product positioning for the hosted platform (pre-silicon bridge, readiness level
 From [crates.io](https://crates.io/crates/xsil) (recommended):
 
 ```bash
-cargo install --locked xsil
+cargo install xsil
 ```
 
-The `--locked` flag tells Cargo to use the bundled `Cargo.lock`, which
-pins every dependency to a version known to compile on **Rust 1.74+**
-(Ubuntu 22.04 / Debian 12 stock toolchain). Without it, Cargo picks
-the newest semver-compatible release of each transitive dep — and
-crates like `openssl`, `rpassword`, and `clap` periodically raise
-their MSRV past what stable distros ship.
+Works out of the box on **Rust 1.74+** (Ubuntu 22.04 / Debian 12 stock
+toolchain). TLS is bundled in-binary via `rustls` — there is **no
+runtime dependency on OpenSSL**, `libssl-dev`, or `pkg-config`. If you
+want fully reproducible compilation that ignores any newer transitive
+releases, add `--locked`:
+
+```bash
+cargo install --locked xsil
+```
 
 Or from a checkout of this repo:
 

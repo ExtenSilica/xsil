@@ -4,6 +4,32 @@ All notable changes to the `xsil` CLI. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] — 2026-05-14
+
+### Changed
+
+- **Switch `reqwest` from `native-tls` to `rustls-tls`.** TLS now lives
+  entirely in Rust (rustls + ring + webpki-roots). The binary no longer
+  links against the system OpenSSL, and `cargo install xsil` no longer
+  needs `pkg-config` or `libssl-dev` on the host — a stock Ubuntu /
+  Debian / Alpine / Docker scratch with just a Rust toolchain is enough.
+- Description tightened: emphasizes that the CLI is the **reference
+  implementation** for the `.xsil` package format — used to **create,
+  validate, package, test, run, and publish** RISC-V instruction
+  extensions.
+
+### Removed
+
+- Dropped the `openssl = "=0.10.78"`, `openssl-sys = "=0.9.114"`, and
+  `native-tls = "=0.2.11"` pins added in 0.2.5/0.2.6. The chain that
+  motivated them is gone with the rustls switch.
+
+### Notes
+
+- This closes the "transitive MSRV / system-library" series of patches
+  (0.2.4 clap, 0.2.5 rpassword, 0.2.6 openssl). All three were symptoms
+  of relying on the system OpenSSL stack — rustls removes the root cause.
+
 ## [0.2.6] — 2026-05-14
 
 ### Fixed
