@@ -4,6 +4,28 @@ All notable changes to the `xsil` CLI. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] — 2026-05-21
+
+### Fixed
+
+- **Default registry URL points at production** (`https://api.extensilica.com`)
+  instead of `http://localhost:3001`. Previous 0.2.x releases shipped the
+  development default in the published binary, so a fresh `cargo install xsil`
+  on any machine without a pre-existing `~/.extensilica/config.json` would
+  immediately fail with "Connection refused" trying to talk to a local
+  backend that wasn't running.
+
+### Added
+
+- **`XSIL_REGISTRY` environment variable** override. Resolution order is now:
+  `~/.extensilica/config.json` → `$XSIL_REGISTRY` → baked-in default. Useful
+  for running the CLI against a local dev backend without touching the
+  config file:
+
+  ```bash
+  XSIL_REGISTRY=http://localhost:3001 xsil search foo
+  ```
+
 ## [0.2.7] — 2026-05-14
 
 ### Changed

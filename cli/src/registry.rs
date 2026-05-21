@@ -97,10 +97,12 @@ impl RegistryClient {
         }
     }
 
-    /// Build a client from the stored config, falling back to the default registry URL.
+    /// Build a client from the stored config, falling back to `$XSIL_REGISTRY`
+    /// and then to the default registry URL baked into the binary.
     pub fn from_config() -> Self {
         let cfg = load_config();
         let url = cfg.registry
+            .or_else(|| std::env::var("XSIL_REGISTRY").ok())
             .unwrap_or_else(|| crate::constants::DEFAULT_REGISTRY.to_string());
         Self::new(&url)
     }
