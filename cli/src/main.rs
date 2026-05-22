@@ -1,28 +1,28 @@
 //! ExtenSilica CLI — publish, install, run, and test `.xsil` packages.
 
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::fs;
-use std::path::PathBuf;
-use anyhow::{bail, Context, Result};
+use semver::Version;
 use simplelog::*;
+use std::collections::HashSet;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
-use semver::Version;
-use std::collections::HashSet;
+use std::path::PathBuf;
 
-mod types;
-mod registry;
-mod manager;
-mod init;
-mod wizard;
 mod constants;
-mod resolver;
+mod init;
+mod manager;
+mod registry;
 mod request;
+mod resolver;
+mod types;
+mod wizard;
 
-use registry::RegistryClient;
 use manager::ExtensionManager;
+use registry::RegistryClient;
 use types::{Manifest, RegistryPackage, RegistryVersion};
 
 // ── CLI definition ────────────────────────────────────────────────────────────
@@ -285,22 +285,16 @@ enum RequestCommand {
     },
 
     /// Show one request by id
-    Show {
-        id: u32,
-    },
+    Show { id: u32 },
 
     /// List requests you created, are assigned to, or expressed interest in
     Mine,
 
     /// Publish a draft request as open (accepting implementer interest)
-    Open {
-        id: u32,
-    },
+    Open { id: u32 },
 
     /// Cancel a request you can edit
-    Cancel {
-        id: u32,
-    },
+    Cancel { id: u32 },
 
     /// Express interest in implementing an open request
     Interest {
@@ -408,7 +402,8 @@ fn run() -> Result<()> {
                     name
                 );
             } else {
-                let created = init::cmd_init(&manager, name, parent.as_deref(), *force, author.as_deref())?;
+                let created =
+                    init::cmd_init(&manager, name, parent.as_deref(), *force, author.as_deref())?;
                 println!(
                     "{} Created package skeleton at {}",
                     "✔".green(),
@@ -493,7 +488,14 @@ fn run() -> Result<()> {
             override_security,
         } => {
             let _lock = manager.acquire_lock()?;
-            cmd_install(&registry, &manager, package, *force, *override_security, cli.dry_run)?;
+            cmd_install(
+                &registry,
+                &manager,
+                package,
+                *force,
+                *override_security,
+                cli.dry_run,
+            )?;
         }
 
         // ── Run ───────────────────────────────────────────────────────────────
@@ -555,7 +557,8 @@ fn run() -> Result<()> {
                 println!("{} Dry run: would run tests: {}", "✔".green(), test_cmd);
             } else {
                 println!("{} Running tests: {}", "➤".blue(), test_cmd);
-                manager.run_shell_in_package_resolved(&work_dir, &test_cmd, &resolved, &exec_env)?;
+                manager
+                    .run_shell_in_package_resolved(&work_dir, &test_cmd, &resolved, &exec_env)?;
                 println!("{} Tests passed.", "✔".green());
             }
             if cleanup {
@@ -574,75 +577,72 @@ fn run() -> Result<()> {
         }
 
         // ── Yank ──────────────────────────────────────────────────────────────
-        Commands::Yank { package_version, reason, restore } => {
+        Commands::Yank {
+            package_version,
+            reason,
+            restore,
+        } => {
             cmd_yank(&registry, package_version, reason.as_deref(), *restore)?;
         }
 
-        Commands::Request { action } => {
-            match action {
-                RequestCommand::Create {
+        Commands::Request { action } => match action {
+            RequestCommand::Create {
+                package,
+                title,
+                description,
+                description_file,
+                visibility,
+                target_capability,
+                acceptance_criteria,
+                acceptance_file,
+                funding_email,
+                funding_note,
+                org_id,
+            } => {
+                request::cmd_create(
+                    &registry,
                     package,
                     title,
                     description,
-                    description_file,
+                    description_file.as_deref(),
                     visibility,
-                    target_capability,
-                    acceptance_criteria,
-                    acceptance_file,
-                    funding_email,
-                    funding_note,
-                    org_id,
-                } => {
-                    request::cmd_create(
-                        &registry,
-                        package,
-                        title,
-                        description,
-                        description_file.as_deref(),
-                        visibility,
-                        target_capability.as_deref(),
-                        acceptance_criteria.as_deref(),
-                        acceptance_file.as_deref(),
-                        funding_email.as_deref(),
-                        funding_note.as_deref(),
-                        *org_id,
-                        cli.dry_run,
-                    )?;
-                }
-                RequestCommand::List {
-                    package,
-                    status,
-                    capability,
-                } => {
-                    request::cmd_list(
-                        &registry,
-                        package.as_deref(),
-                        status.as_deref(),
-                        capability.as_deref(),
-                    )?;
-                }
-                RequestCommand::Show { id } => {
-                    request::cmd_show(&registry, *id)?;
-                }
-                RequestCommand::Mine => {
-                    request::cmd_mine(&registry)?;
-                }
-                RequestCommand::Open { id } => {
-                    request::cmd_open(&registry, *id, cli.dry_run)?;
-                }
-                RequestCommand::Cancel { id } => {
-                    request::cmd_cancel(&registry, *id, cli.dry_run)?;
-                }
-                RequestCommand::Interest { id, message } => {
-                    request::cmd_interest(
-                        &registry,
-                        *id,
-                        message.as_deref(),
-                        cli.dry_run,
-                    )?;
-                }
+                    target_capability.as_deref(),
+                    acceptance_criteria.as_deref(),
+                    acceptance_file.as_deref(),
+                    funding_email.as_deref(),
+                    funding_note.as_deref(),
+                    *org_id,
+                    cli.dry_run,
+                )?;
             }
-        }
+            RequestCommand::List {
+                package,
+                status,
+                capability,
+            } => {
+                request::cmd_list(
+                    &registry,
+                    package.as_deref(),
+                    status.as_deref(),
+                    capability.as_deref(),
+                )?;
+            }
+            RequestCommand::Show { id } => {
+                request::cmd_show(&registry, *id)?;
+            }
+            RequestCommand::Mine => {
+                request::cmd_mine(&registry)?;
+            }
+            RequestCommand::Open { id } => {
+                request::cmd_open(&registry, *id, cli.dry_run)?;
+            }
+            RequestCommand::Cancel { id } => {
+                request::cmd_cancel(&registry, *id, cli.dry_run)?;
+            }
+            RequestCommand::Interest { id, message } => {
+                request::cmd_interest(&registry, *id, message.as_deref(), cli.dry_run)?;
+            }
+        },
     }
 
     Ok(())
@@ -671,13 +671,24 @@ fn cmd_token(registry: &RegistryClient, action: &TokenCommand) -> Result<()> {
         }
         TokenCommand::Create { name } => {
             let (raw, row) = registry.create_token(name)?;
-            println!("{} Created token {} (id {}).", "✔".green(), row.name.bold(), row.id);
+            println!(
+                "{} Created token {} (id {}).",
+                "✔".green(),
+                row.name.bold(),
+                row.id
+            );
             println!();
-            println!("  {}", "Copy this token NOW — it will not be shown again:".yellow());
+            println!(
+                "  {}",
+                "Copy this token NOW — it will not be shown again:".yellow()
+            );
             println!("    {}", raw.bold());
             println!();
             println!("  {}", "Use it with the CLI on another machine:".dimmed());
-            println!("    xsil login --name \"{}\"  # to mint a separate token interactively", row.name);
+            println!(
+                "    xsil login --name \"{}\"  # to mint a separate token interactively",
+                row.name
+            );
             println!("    # or paste the raw value into ~/.config/xsil/config.json");
         }
         TokenCommand::Revoke { id } => {
@@ -706,7 +717,10 @@ fn print_token_table(rows: &[&types::ApiTokenRow]) {
             row.id,
             truncate_for_display(&row.name, 32),
             short_iso(&row.created_at),
-            row.last_used_at.as_deref().map(short_iso).unwrap_or_else(|| "—".to_string()),
+            row.last_used_at
+                .as_deref()
+                .map(short_iso)
+                .unwrap_or_else(|| "—".to_string()),
         );
     }
 }
@@ -747,8 +761,8 @@ fn cmd_publish(
             bail!("manifest.json not found in {}", input.display());
         }
         let content = fs::read_to_string(&manifest_path)?;
-        let manifest: Manifest = serde_json::from_str(&content)
-            .context("manifest.json is not valid JSON")?;
+        let manifest: Manifest =
+            serde_json::from_str(&content).context("manifest.json is not valid JSON")?;
 
         // Validate required fields.
         validate_publish_manifest(&manifest)?;
@@ -756,7 +770,7 @@ fn cmd_publish(
         println!("{} Packing {}...", "➤".blue(), input.display());
         let bytes = manager.pack_directory(&input)?;
         (bytes, manifest, true)
-    } else if input.extension().map_or(false, |e| e == "xsil") {
+    } else if input.extension().is_some_and(|e| e == "xsil") {
         let bytes = fs::read(&input).context("Failed to read .xsil file")?;
         // Extract manifest from the archive.
         let manifest = extract_manifest_from_bytes(&bytes)?;
@@ -856,7 +870,7 @@ fn cmd_install(
     let path = PathBuf::from(package);
 
     // Local .xsil file.
-    if path.is_file() && path.extension().map_or(false, |e| e == "xsil") {
+    if path.is_file() && path.extension().is_some_and(|e| e == "xsil") {
         println!("{} Installing from file {}...", "➤".blue(), package);
         let bytes = fs::read(&path).context("Failed to read .xsil file")?;
         let manifest = extract_manifest_from_bytes(&bytes)?;
@@ -871,7 +885,8 @@ fn cmd_install(
         }
         // Prefetch resolved dependencies before committing install so package is ready immediately.
         let (prefetch_dir, prefetch_manifest) = manager.extract_and_validate_xsil(&bytes)?;
-        let prefetch_result = resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
+        let prefetch_result =
+            resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
         fs::remove_dir_all(&prefetch_dir).ok();
         prefetch_result?;
         manager.install_extension(&manifest.name, &manifest.version, &bytes, force)?;
@@ -910,14 +925,14 @@ fn cmd_install(
     // Downgrade check.
     if let Ok(installed_path) = manager.get_installed_extension_path(&slug) {
         if let Ok(m) = manager.read_manifest(&installed_path) {
-            if let (Ok(installed_ver), Ok(target_ver)) = (
-                Version::parse(&m.version),
-                Version::parse(&version.version),
-            ) {
+            if let (Ok(installed_ver), Ok(target_ver)) =
+                (Version::parse(&m.version), Version::parse(&version.version))
+            {
                 if target_ver < installed_ver && !force {
                     bail!(
                         "Would install older version ({} < {}). Use --force.",
-                        target_ver, installed_ver
+                        target_ver,
+                        installed_ver
                     );
                 }
             }
@@ -940,7 +955,8 @@ fn cmd_install(
 
     // Prefetch resolved dependencies before install commit.
     let (prefetch_dir, prefetch_manifest) = manager.extract_and_validate_xsil(&bytes)?;
-    let prefetch_result = resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
+    let prefetch_result =
+        resolver::resolve_execution_env(&prefetch_manifest, &prefetch_dir, Some(registry));
     fs::remove_dir_all(&prefetch_dir).ok();
     prefetch_result?;
 
@@ -1076,8 +1092,7 @@ fn execution_indicates_tests(execution_raw: Option<&str>) -> bool {
         .map(str::trim)
         .map(|s| !s.is_empty())
         .unwrap_or(false)
-        || o
-            .get("tests")
+        || o.get("tests")
             .and_then(|x| x.as_str())
             .map(str::trim)
             .map(|s| !s.is_empty())
@@ -1095,7 +1110,12 @@ fn targets_object_keys(raw: Option<&str>) -> Vec<String> {
 fn compute_capability_badges(v: &RegistryVersion) -> (HashSet<&'static str>, u8) {
     let mut badges: HashSet<&'static str> = HashSet::new();
 
-    if v.isa.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some() {
+    if v.isa
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
         badges.insert("ISA");
     }
 
@@ -1135,9 +1155,11 @@ fn compute_capability_badges(v: &RegistryVersion) -> (HashSet<&'static str>, u8)
         badges.insert("Repro: bundled");
     } else if rm == "resolved" {
         badges.insert("Repro: resolved");
-    } else if rm == "host-dependent" || rm == "host_dependent" || rm == "hostdependent" {
-        badges.insert("Repro: host-dependent");
-    } else if tc_external == Some(true) {
+    } else if rm == "host-dependent"
+        || rm == "host_dependent"
+        || rm == "hostdependent"
+        || tc_external == Some(true)
+    {
         badges.insert("Repro: host-dependent");
     }
 
@@ -1195,11 +1217,7 @@ fn readiness_name(level: u8) -> &'static str {
 fn print_readiness_block(v: &RegistryVersion) {
     let (mut badge_set, inferred_level) = compute_capability_badges(v);
     let rl = v.readiness_level.unwrap_or(inferred_level);
-    println!(
-        "  Readiness   : RL{} — {}",
-        rl,
-        readiness_name(rl)
-    );
+    println!("  Readiness   : RL{} — {}", rl, readiness_name(rl));
 
     let stored = stored_capabilities_tokens(v.capabilities.as_deref());
     const BADGE_KEYS: [&str; 10] = [
@@ -1315,11 +1333,7 @@ fn print_registry_version_repro_fields(v: &RegistryVersion) {
     }
 }
 
-fn cmd_info(
-    registry: &RegistryClient,
-    manager: &ExtensionManager,
-    package: &str,
-) -> Result<()> {
+fn cmd_info(registry: &RegistryClient, manager: &ExtensionManager, package: &str) -> Result<()> {
     // Parse optional @version suffix (e.g. "rvx-demo@1.2.0" or "rvx-demo@latest").
     let (slug, requested_version) = parse_package_arg(package);
 
@@ -1346,11 +1360,7 @@ fn cmd_info(
         println!("  Homepage    : {}", hp);
     }
     if let Some(ref o) = pkg.org {
-        println!(
-            "  Organization: @{} ({})",
-            o.slug.bold(),
-            o.display_name
-        );
+        println!("  Organization: @{} ({})", o.slug.bold(), o.display_name);
     }
     println!("  Downloads   : {}", pkg.total_downloads);
     println!("  Weekly dl   : {}", pkg.weekly_downloads);
@@ -1372,14 +1382,18 @@ fn cmd_info(
                 let dl = v.download_count;
                 println!("  ISA         : {}", isa);
                 println!("  Downloads   : {}", dl);
-                println!("  Published   : {}", v.published_at.as_deref().unwrap_or("—"));
+                println!(
+                    "  Published   : {}",
+                    v.published_at.as_deref().unwrap_or("—")
+                );
                 print_readiness_block(v);
                 print_registry_version_repro_fields(v);
                 if let Some(ref cs) = v.checksum {
                     println!("  Checksum    : {}", &cs[..cs.len().min(20)]);
                 }
                 let cl = v.changelog.as_deref().unwrap_or("");
-                if let Some(first_line) = cl.lines().next().map(str::trim).filter(|s| !s.is_empty()) {
+                if let Some(first_line) = cl.lines().next().map(str::trim).filter(|s| !s.is_empty())
+                {
                     println!("  Changelog   : {}", first_line);
                 }
                 if v.is_yanked {
@@ -1419,7 +1433,11 @@ fn cmd_info(
                 let dl = v.download_count;
                 let isa = v.isa.as_deref().unwrap_or("?");
                 let is_latest = pkg.latest_version.as_deref() == Some(v.version.as_str());
-                let tag = if is_latest { " (latest)".green().to_string() } else { String::new() };
+                let tag = if is_latest {
+                    " (latest)".green().to_string()
+                } else {
+                    String::new()
+                };
                 println!("    {} ({}  — {} dl){}", v.version.cyan(), isa, dl, tag);
             }
         }
@@ -1428,7 +1446,11 @@ fn cmd_info(
     // Local install status.
     if let Ok(installed_path) = manager.get_installed_extension_path(&slug) {
         if let Ok(m) = manager.read_manifest(&installed_path) {
-            println!("  Installed   : {} at {}", m.version.green(), installed_path.display());
+            println!(
+                "  Installed   : {} at {}",
+                m.version.green(),
+                installed_path.display()
+            );
         }
     }
 
@@ -1481,7 +1503,7 @@ fn resolve_and_load(
     }
 
     // Local .xsil file.
-    if path.is_file() && path.extension().map_or(false, |e| e == "xsil") {
+    if path.is_file() && path.extension().is_some_and(|e| e == "xsil") {
         let bytes = fs::read(&path).context("Failed to read .xsil file")?;
         let (dir, manifest) = manager.extract_and_validate_xsil(&bytes)?;
         return Ok((dir, manifest, true));
@@ -1523,7 +1545,7 @@ fn parse_package_arg(package: &str) -> (String, Option<String>) {
         // e.g. "scope/pkg@1.0.0" → slug="@scope/pkg", ver="1.0.0"
         if let Some(at_pos) = rest.find('@') {
             let slug = format!("@{}", &rest[..at_pos]);
-            let ver  = rest[at_pos + 1..].to_string();
+            let ver = rest[at_pos + 1..].to_string();
             (slug, Some(ver))
         } else {
             (package.to_string(), None)
@@ -1582,8 +1604,7 @@ fn extract_manifest_from_bytes(data: &[u8]) -> Result<Manifest> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?;
-        if path.file_name().map_or(false, |n| n == "manifest.json")
-            && path.components().count() == 1
+        if path.file_name().is_some_and(|n| n == "manifest.json") && path.components().count() == 1
         {
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
@@ -1602,7 +1623,10 @@ fn validate_publish_manifest(m: &Manifest) -> Result<()> {
         bail!("manifest.version is required");
     }
     if Version::parse(&m.version).is_err() {
-        bail!("manifest.version '{}' is not valid semver (e.g. 1.0.0)", m.version);
+        bail!(
+            "manifest.version '{}' is not valid semver (e.g. 1.0.0)",
+            m.version
+        );
     }
     if m.description.is_empty() {
         bail!("manifest.description is required");
@@ -1640,9 +1664,19 @@ fn cmd_yank(
     }
 
     if restore {
-        println!("{} Restoring {}@{}...", "➤".blue(), slug.bold(), version.cyan());
+        println!(
+            "{} Restoring {}@{}...",
+            "➤".blue(),
+            slug.bold(),
+            version.cyan()
+        );
     } else {
-        println!("{} Yanking {}@{}...", "➤".blue(), slug.bold(), version.cyan());
+        println!(
+            "{} Yanking {}@{}...",
+            "➤".blue(),
+            slug.bold(),
+            version.cyan()
+        );
         if let Some(r) = reason {
             println!("  Reason  : {}", r);
         }
@@ -1655,9 +1689,7 @@ fn cmd_yank(
         .and_then(|v| v.as_bool())
         .unwrap_or(!restore);
 
-    let latest = result
-        .get("latestVersion")
-        .and_then(|v| v.as_str());
+    let latest = result.get("latestVersion").and_then(|v| v.as_str());
 
     if is_yanked {
         println!("{} Yanked {}@{}", "✔".green(), slug.bold(), version.cyan());
@@ -1665,7 +1697,12 @@ fn cmd_yank(
             println!("  Reason  : {}", reason.unwrap_or(""));
         }
     } else {
-        println!("{} Restored {}@{}", "✔".green(), slug.bold(), version.cyan());
+        println!(
+            "{} Restored {}@{}",
+            "✔".green(),
+            slug.bold(),
+            version.cyan()
+        );
     }
 
     match latest {

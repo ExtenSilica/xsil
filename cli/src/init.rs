@@ -10,7 +10,15 @@ use crate::types::{Manifest, ManifestChecksums};
 
 /// Names blocked for the same reasons as the registry (subset; see store-backend name policy).
 const RESERVED_SLUGS: &[&str] = &[
-    "xsil", "extensilica", "registry", "store", "admin", "root", "test", "demo", "example",
+    "xsil",
+    "extensilica",
+    "registry",
+    "store",
+    "admin",
+    "root",
+    "test",
+    "demo",
+    "example",
 ];
 
 fn default_author() -> String {
@@ -73,7 +81,8 @@ fn mark_executable(_path: &Path) -> Result<()> {
 
 fn write(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create_dir_all {}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create_dir_all {}", parent.display()))?;
     }
     fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
@@ -108,9 +117,7 @@ pub fn cmd_init(
     fs::create_dir_all(root.join("docs")).context("create docs/")?;
     fs::create_dir_all(root.join("toolchain")).context("create toolchain/")?;
 
-    let author_str = author
-        .map(String::from)
-        .unwrap_or_else(default_author);
+    let author_str = author.map(String::from).unwrap_or_else(default_author);
 
     write(
         &root.join("README.md"),
@@ -285,8 +292,14 @@ mod tests {
         let parent = tmp.path().join("work");
         fs::create_dir_all(&parent).unwrap();
 
-        let root = cmd_init(&mgr, "init-test-pkg", Some(parent.as_path()), false, Some("tester"))
-            .expect("cmd_init");
+        let root = cmd_init(
+            &mgr,
+            "init-test-pkg",
+            Some(parent.as_path()),
+            false,
+            Some("tester"),
+        )
+        .expect("cmd_init");
 
         assert!(root.join("manifest.json").is_file());
         let _ = mgr

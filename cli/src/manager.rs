@@ -1,16 +1,16 @@
-use fs2::FileExt;
 use anyhow::{bail, Context, Result};
-use flate2::read::GzDecoder;
-use sha2::{Sha256, Digest};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::io::Read;
-use tar::Archive;
 use colored::*;
+use flate2::read::GzDecoder;
+use fs2::FileExt;
 use semver::Version;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use tar::Archive;
 
+use crate::resolver::{expand_env, ResolvedEnv};
 use crate::types::{InstalledExtension, Manifest};
-use crate::resolver::{ResolvedEnv, expand_env};
 use std::collections::HashMap;
 
 // ── .xsilignore support ───────────────────────────────────────────────────────
@@ -40,12 +40,7 @@ pub struct IgnoreRules {
 
 impl IgnoreRules {
     /// Built-in entries that are **always** excluded, regardless of user rules.
-    const BUILTIN: &'static [&'static str] = &[
-        ".git",
-        ".xsilignore",
-        ".DS_Store",
-        "Thumbs.db",
-    ];
+    const BUILTIN: &'static [&'static str] = &[".git", ".xsilignore", ".DS_Store", "Thumbs.db"];
 
     /// Load rules from `<dir>/.xsilignore`.  If the file is absent, an empty
     /// rule set (only built-ins apply) is returned without error.
@@ -161,6 +156,7 @@ impl ExtensionManager {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)
             .context("Failed to open lock file")?;
         file.try_lock_exclusive()
@@ -184,7 +180,8 @@ impl ExtensionManager {
             if !force {
                 bail!(
                     "{} v{} is already installed. Use --force to reinstall.",
-                    name, version
+                    name,
+                    version
                 );
             }
             fs::remove_dir_all(&install_path)?;
@@ -210,13 +207,16 @@ impl ExtensionManager {
         }
 
         let manifest_content = fs::read_to_string(&manifest_path)?;
-        let manifest: Manifest = serde_json::from_str(&manifest_content)
-            .context("manifest.json is not valid JSON.")?;
+        let manifest: Manifest =
+            serde_json::from_str(&manifest_content).context("manifest.json is not valid JSON.")?;
 
         // Semver validation.
         if Version::parse(&manifest.version).is_err() {
             fs::remove_dir_all(&temp_dir).ok();
-            bail!("manifest version '{}' is not valid semver.", manifest.version);
+            bail!(
+                "manifest version '{}' is not valid semver.",
+                manifest.version
+            );
         }
 
         // Payload hash validation.
@@ -250,10 +250,7 @@ impl ExtensionManager {
 
     /// Extract a `.xsil` tarball to a temporary directory and validate the payload hash.
     /// Returns `(temp_dir, manifest)`. Caller must remove temp_dir when done.
-    pub fn extract_and_validate_xsil(
-        &self,
-        tarball_data: &[u8],
-    ) -> Result<(PathBuf, Manifest)> {
+    pub fn extract_and_validate_xsil(&self, tarball_data: &[u8]) -> Result<(PathBuf, Manifest)> {
         let temp_dir = self
             .root_dir
             .join("tmp")
@@ -366,7 +363,11 @@ impl ExtensionManager {
             all.len().saturating_sub(files.len())
         };
         if skipped > 0 {
-            println!("  {} {} file(s) excluded by .xsilignore", "↓".dimmed(), skipped);
+            println!(
+                "  {} {} file(s) excluded by .xsilignore",
+                "↓".dimmed(),
+                skipped
+            );
         }
 
         Ok(buf)
@@ -601,8 +602,8 @@ impl ExtensionManager {
     }
 
     pub fn read_manifest(&self, path: &Path) -> Result<Manifest> {
-        let content = fs::read_to_string(path.join("manifest.json"))
-            .context("manifest.json not found")?;
+        let content =
+            fs::read_to_string(path.join("manifest.json")).context("manifest.json not found")?;
         serde_json::from_str(&content).context("Invalid manifest.json")
     }
 
@@ -670,7 +671,8 @@ mod tests {
     fn archive_members(archive_bytes: &[u8]) -> Vec<String> {
         let gz = GzDecoder::new(archive_bytes);
         let mut ar = Archive::new(gz);
-        ar.entries().unwrap()
+        ar.entries()
+            .unwrap()
             .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
             .collect()
     }
@@ -682,11 +684,26 @@ mod tests {
         let mgr = ExtensionManager::new(tmp.path().join("xsil-root"));
         let bytes = mgr.pack_directory(tmp.path()).unwrap();
         let members = archive_members(&bytes);
-        assert!(!members.iter().any(|m| m.contains(".git")),    ".git must be excluded");
-        assert!(!members.iter().any(|m| m.contains(".DS_Store")),".DS_Store must be excluded");
-        assert!(!members.iter().any(|m| m.contains(".xsilignore")),".xsilignore itself must be excluded");
-        assert!(members.iter().any(|m| m.contains("manifest.json")), "manifest.json must be included");
-        assert!(members.iter().any(|m| m.contains("README.md")),     "README.md must be included");
+        assert!(
+            !members.iter().any(|m| m.contains(".git")),
+            ".git must be excluded"
+        );
+        assert!(
+            !members.iter().any(|m| m.contains(".DS_Store")),
+            ".DS_Store must be excluded"
+        );
+        assert!(
+            !members.iter().any(|m| m.contains(".xsilignore")),
+            ".xsilignore itself must be excluded"
+        );
+        assert!(
+            members.iter().any(|m| m.contains("manifest.json")),
+            "manifest.json must be included"
+        );
+        assert!(
+            members.iter().any(|m| m.contains("README.md")),
+            "README.md must be included"
+        );
     }
 
     #[test]
@@ -696,9 +713,18 @@ mod tests {
         let mgr = ExtensionManager::new(tmp.path().join("xsil-root"));
         let bytes = mgr.pack_directory(tmp.path()).unwrap();
         let members = archive_members(&bytes);
-        assert!(!members.iter().any(|m| m.contains("sim/bin")), "sim/bin/ must be excluded");
-        assert!(!members.iter().any(|m| m.ends_with(".log")),   "*.log must be excluded");
-        assert!(members.iter().any(|m| m.contains("src/hello.c")), "src/hello.c must be included");
+        assert!(
+            !members.iter().any(|m| m.contains("sim/bin")),
+            "sim/bin/ must be excluded"
+        );
+        assert!(
+            !members.iter().any(|m| m.ends_with(".log")),
+            "*.log must be excluded"
+        );
+        assert!(
+            members.iter().any(|m| m.contains("src/hello.c")),
+            "src/hello.c must be included"
+        );
     }
 
     #[test]
@@ -709,7 +735,10 @@ mod tests {
         let bytes = mgr.pack_directory(tmp.path()).unwrap();
         let members = archive_members(&bytes);
         // debug.log is un-ignored by the ! rule
-        assert!(members.iter().any(|m| m.contains("debug.log")), "debug.log must be un-ignored");
+        assert!(
+            members.iter().any(|m| m.contains("debug.log")),
+            "debug.log must be un-ignored"
+        );
     }
 
     #[test]
@@ -778,8 +807,7 @@ mod tests {
         let mgr = ExtensionManager::new(std::env::temp_dir());
         let ignore = IgnoreRules::load(&root);
         let mut files: Vec<PathBuf> = Vec::new();
-        mgr
-            .collect_files_filtered(&root, &root, &ignore, &mut files)
+        mgr.collect_files_filtered(&root, &root, &ignore, &mut files)
             .unwrap();
         files.sort();
         let hashed_order: Vec<String> = files
@@ -788,7 +816,12 @@ mod tests {
                 !(p.file_name().unwrap_or_default() == "manifest.json"
                     && p.parent().map(|x| x.canonicalize().ok()) == Some(root.canonicalize().ok()))
             })
-            .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned())
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         assert_eq!(
             hashed_order.join("\n"),

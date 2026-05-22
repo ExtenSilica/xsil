@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
+use colored::*;
 use reqwest::blocking::Client;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::collections::HashMap;
-use colored::*;
 
 use crate::types::{
     ApiTokenRow, ImplementationRequest, RegistryPackage, ResolveArtifactsResponse, UserProfile,
@@ -101,7 +101,8 @@ impl RegistryClient {
     /// and then to the default registry URL baked into the binary.
     pub fn from_config() -> Self {
         let cfg = load_config();
-        let url = cfg.registry
+        let url = cfg
+            .registry
             .or_else(|| std::env::var("XSIL_REGISTRY").ok())
             .unwrap_or_else(|| crate::constants::DEFAULT_REGISTRY.to_string());
         Self::new(&url)
@@ -121,7 +122,13 @@ impl RegistryClient {
             .trim_start_matches("sha256:")
             .trim_start_matches("sha256-")
             .to_ascii_lowercase();
-        format!("{}::{}::{}::{}", name.trim(), version.trim(), platform.trim(), sha)
+        format!(
+            "{}::{}::{}::{}",
+            name.trim(),
+            version.trim(),
+            platform.trim(),
+            sha
+        )
     }
 
     // ── Auth endpoints ────────────────────────────────────────────────────────
@@ -168,7 +175,9 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(
                 "Login failed: {}",
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error")
             );
         }
 
@@ -198,9 +207,7 @@ impl RegistryClient {
 
     /// Call POST /auth/logout to invalidate the current token, then clear it locally.
     pub fn logout(&self) -> Result<()> {
-        let token = self
-            .load_token()
-            .context("Not logged in. Nothing to do.")?;
+        let token = self.load_token().context("Not logged in. Nothing to do.")?;
 
         let resp = self
             .client
@@ -211,7 +218,11 @@ impl RegistryClient {
 
         if !resp.status().is_success() {
             // Token may already be invalid; still clear it locally.
-            eprintln!("{} Registry returned {}; clearing token anyway.", "!".yellow(), resp.status());
+            eprintln!(
+                "{} Registry returned {}; clearing token anyway.",
+                "!".yellow(),
+                resp.status()
+            );
         }
 
         let mut cfg = load_config();
@@ -241,7 +252,9 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(
                 "{}",
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to list tokens")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Failed to list tokens")
             );
         }
 
@@ -276,7 +289,9 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(
                 "{}",
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to create token")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Failed to create token")
             );
         }
 
@@ -286,7 +301,9 @@ impl RegistryClient {
             .context("Missing `token` (raw) in response")?
             .to_string();
         let row: ApiTokenRow = serde_json::from_value(
-            json.get("apiToken").cloned().context("Missing `apiToken` in response")?,
+            json.get("apiToken")
+                .cloned()
+                .context("Missing `apiToken` in response")?,
         )
         .context("Failed to parse apiToken row")?;
         Ok((raw, row))
@@ -311,7 +328,9 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(
                 "{}",
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to revoke token")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Failed to revoke token")
             );
         }
 
@@ -340,14 +359,14 @@ impl RegistryClient {
         if !status.is_success() {
             bail!(
                 "{}",
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("Not authenticated")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Not authenticated")
             );
         }
 
-        let user: UserProfile = serde_json::from_value(
-            json.get("user").cloned().unwrap_or(json),
-        )
-        .context("Failed to parse user profile")?;
+        let user: UserProfile = serde_json::from_value(json.get("user").cloned().unwrap_or(json))
+            .context("Failed to parse user profile")?;
 
         Ok(user)
     }
@@ -478,11 +497,7 @@ impl RegistryClient {
         serde_json::from_value(request).context("Failed to parse implementation request")
     }
 
-    pub fn create_implementation_interest(
-        &self,
-        id: u32,
-        body: &serde_json::Value,
-    ) -> Result<()> {
+    pub fn create_implementation_interest(&self, id: u32, body: &serde_json::Value) -> Result<()> {
         let path = format!("/implementation-requests/{id}/interests");
         self.authed_json(reqwest::Method::POST, &path, Some(body))?;
         Ok(())
@@ -500,6 +515,7 @@ impl RegistryClient {
     // ── Package publish ───────────────────────────────────────────────────────
 
     /// Upload a `.xsil` archive to the registry as a new package version.
+    #[allow(clippy::too_many_arguments)]
     pub fn publish(
         &self,
         slug: &str,
@@ -549,7 +565,9 @@ impl RegistryClient {
             bail!(
                 "Publish failed ({}): {}",
                 status,
-                json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error")
+                json.get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error")
             );
         }
 
@@ -577,11 +595,9 @@ impl RegistryClient {
         if !resp.status().is_success() {
             bail!("Search failed: {}", resp.status());
         }
-        let list: Vec<RegistryPackage> =
-            resp.json().context("Failed to parse search results")?;
+        let list: Vec<RegistryPackage> = resp.json().context("Failed to parse search results")?;
         Ok(list)
     }
-
 
     /// Fetch metadata for a single package by slug.
     pub fn get_package(&self, slug: &str) -> Result<RegistryPackage> {
@@ -600,7 +616,6 @@ impl RegistryClient {
         let pkg: RegistryPackage = resp.json().context("Failed to parse package metadata")?;
         Ok(pkg)
     }
-
 
     /// Call `PATCH /packages/:slug/versions/:version` to yank or restore a version.
     ///
@@ -695,8 +710,8 @@ impl RegistryClient {
             );
         }
 
-        let parsed: ResolveArtifactsResponse = serde_json::from_value(json)
-            .context("Failed to parse resolved artifacts response")?;
+        let parsed: ResolveArtifactsResponse =
+            serde_json::from_value(json).context("Failed to parse resolved artifacts response")?;
         if !parsed.missing.is_empty() {
             let sample = parsed
                 .missing
@@ -720,4 +735,3 @@ impl RegistryClient {
         Ok(out)
     }
 }
-

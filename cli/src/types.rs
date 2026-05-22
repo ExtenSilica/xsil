@@ -1,3 +1,7 @@
+// These structs mirror the registry/auth API wire format. Some fields are
+// deserialized to document the contract but not yet read by the CLI; keep them.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 // ── Manifest (in-package manifest.json) ──────────────────────────────────────
@@ -49,7 +53,11 @@ pub struct Manifest {
     /// Honest classification of the extension's relationship to the RISC-V standard.
     /// One of: "ratified", "draft", "vendor", "research", "custom".
     /// Optional for backwards compatibility with v0.1 manifests.
-    #[serde(rename = "standardStatus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "standardStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub standard_status: Option<String>,
 
     /// Free-text spec authority (e.g. "RISC-V International", "T-Head / XuanTie").
@@ -77,7 +85,9 @@ impl Manifest {
                 return c.payload.trim_start_matches("sha256:");
             }
         }
-        self.payload_hash.trim_start_matches("sha256-").trim_start_matches("sha256:")
+        self.payload_hash
+            .trim_start_matches("sha256-")
+            .trim_start_matches("sha256:")
     }
 
     /// Entry command for `xsil run`, preferring v0.2 `execution.entry` over legacy `entry`.
@@ -341,4 +351,3 @@ pub struct InstalledExtension {
     pub installed_at: String,
     pub path: String,
 }
-

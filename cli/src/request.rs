@@ -22,15 +22,7 @@ const FUNDING_NOTE_MAX: usize = 2000;
 const INTEREST_MESSAGE_MAX: usize = 500;
 
 const FORBIDDEN_MONEY_KEYS: &[&str] = &[
-    "amount",
-    "currency",
-    "wallet",
-    "txhash",
-    "payout",
-    "escrow",
-    "usdc",
-    "funded",
-    "paid",
+    "amount", "currency", "wallet", "txhash", "payout", "escrow", "usdc", "funded", "paid",
 ];
 
 /// Reject bodies that carry on-platform payment fields (mirrors registry guard).
@@ -82,7 +74,7 @@ fn optional_trimmed(s: Option<&str>, max: usize, field: &str) -> Result<Option<S
 fn validate_title(title: &str) -> Result<()> {
     let t = title.trim();
     let n = t.chars().count();
-    if n < TITLE_MIN || n > TITLE_MAX {
+    if !(TITLE_MIN..=TITLE_MAX).contains(&n) {
         bail!("title must be between {TITLE_MIN} and {TITLE_MAX} characters.");
     }
     Ok(())
@@ -91,7 +83,7 @@ fn validate_title(title: &str) -> Result<()> {
 fn validate_description(description: &str) -> Result<()> {
     let t = description.trim();
     let n = t.chars().count();
-    if n < DESCRIPTION_MIN || n > DESCRIPTION_MAX {
+    if !(DESCRIPTION_MIN..=DESCRIPTION_MAX).contains(&n) {
         bail!("description must be between {DESCRIPTION_MIN} and {DESCRIPTION_MAX} characters.");
     }
     Ok(())
@@ -102,9 +94,7 @@ fn parse_visibility(raw: &str) -> Result<&'static str> {
         "public" => Ok("public"),
         "org_only" => Ok("org_only"),
         "unlisted" => Ok("unlisted"),
-        other => bail!(
-            "visibility must be public, org_only, or unlisted (got \"{other}\")"
-        ),
+        other => bail!("visibility must be public, org_only, or unlisted (got \"{other}\")"),
     }
 }
 
@@ -115,6 +105,7 @@ fn send_body(_registry: &RegistryClient, body: &Value) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_create(
     registry: &RegistryClient,
     package: &str,
@@ -132,8 +123,7 @@ pub fn cmd_create(
 ) -> Result<()> {
     validate_title(title)?;
     let description = if let Some(path) = description_file {
-        fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?
     } else if description.trim().is_empty() {
         bail!("Provide --description or --description-file.");
     } else {
@@ -142,11 +132,16 @@ pub fn cmd_create(
     validate_description(&description)?;
 
     let vis = parse_visibility(visibility)?;
-    let target_capability = optional_trimmed(target_capability, TARGET_CAPABILITY_MAX, "targetCapability")?;
+    let target_capability =
+        optional_trimmed(target_capability, TARGET_CAPABILITY_MAX, "targetCapability")?;
     let acceptance_criteria = if let Some(path) = acceptance_file {
         let text = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        optional_trimmed(Some(&text), ACCEPTANCE_CRITERIA_MAX, "acceptanceCriteriaSummary")?
+        optional_trimmed(
+            Some(&text),
+            ACCEPTANCE_CRITERIA_MAX,
+            "acceptanceCriteriaSummary",
+        )?
     } else {
         optional_trimmed(
             acceptance_criteria,
@@ -154,9 +149,11 @@ pub fn cmd_create(
             "acceptanceCriteriaSummary",
         )?
     };
-    let funding_note =
-        optional_trimmed(funding_note, FUNDING_NOTE_MAX, "fundingNote")?;
-    let funding_email = funding_email.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let funding_note = optional_trimmed(funding_note, FUNDING_NOTE_MAX, "fundingNote")?;
+    let funding_email = funding_email
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     let mut body = Map::new();
     body.insert("title".into(), json!(title.trim()));
@@ -224,11 +221,7 @@ pub fn cmd_list(
         "title".dimmed(),
     );
     for r in &requests {
-        let slug = r
-            .package
-            .as_ref()
-            .map(|p| p.slug.as_str())
-            .unwrap_or("?");
+        let slug = r.package.as_ref().map(|p| p.slug.as_str()).unwrap_or("?");
         println!(
             "  {:<6} {:<10} {:<28} {}",
             r.id,
@@ -238,7 +231,10 @@ pub fn cmd_list(
         );
     }
     println!();
-    println!("  {} request(s). Use `xsil request show <id>` for details.", requests.len());
+    println!(
+        "  {} request(s). Use `xsil request show <id>` for details.",
+        requests.len()
+    );
     Ok(())
 }
 
@@ -269,7 +265,12 @@ pub fn cmd_open(registry: &RegistryClient, id: u32, dry_run: bool) -> Result<()>
         return Ok(());
     }
     let req = registry.patch_implementation_request(id, &body)?;
-    println!("{} Request #{} is now {}.", "✔".green(), id, req.status.cyan());
+    println!(
+        "{} Request #{} is now {}.",
+        "✔".green(),
+        id,
+        req.status.cyan()
+    );
     Ok(())
 }
 
@@ -281,7 +282,12 @@ pub fn cmd_cancel(registry: &RegistryClient, id: u32, dry_run: bool) -> Result<(
         return Ok(());
     }
     let req = registry.patch_implementation_request(id, &body)?;
-    println!("{} Request #{} is now {}.", "✔".green(), id, req.status.yellow());
+    println!(
+        "{} Request #{} is now {}.",
+        "✔".green(),
+        id,
+        req.status.yellow()
+    );
     Ok(())
 }
 
@@ -299,7 +305,11 @@ pub fn cmd_interest(
     };
     send_body(registry, &body)?;
     if dry_run {
-        println!("{} Dry run: would express interest in request #{}.", "✔".green(), id);
+        println!(
+            "{} Dry run: would express interest in request #{}.",
+            "✔".green(),
+            id
+        );
         return Ok(());
     }
     registry.create_implementation_interest(id, &body)?;
@@ -318,11 +328,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 fn print_request_summary(req: &ImplementationRequest, created: bool) {
-    let slug = req
-        .package
-        .as_ref()
-        .map(|p| p.slug.as_str())
-        .unwrap_or("?");
+    let slug = req.package.as_ref().map(|p| p.slug.as_str()).unwrap_or("?");
     let prefix = if created { "Created" } else { "Request" };
     println!(
         "{} {} #{} on {} — {}",
@@ -365,13 +371,13 @@ fn print_request_detail(req: &ImplementationRequest) {
         println!("{}", "Acceptance criteria".bold());
         println!("{acc}");
     }
-    if let Some(email) = req.funding_contact_email.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(email) = req
+        .funding_contact_email
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
         println!();
-        println!(
-            "{} Funding is off-platform. Contact: {}",
-            "i".cyan(),
-            email
-        );
+        println!("{} Funding is off-platform. Contact: {}", "i".cyan(), email);
         if let Some(note) = req.funding_note.as_deref().filter(|s| !s.is_empty()) {
             println!("  {}", note.dimmed());
         }

@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::Manifest;
 use crate::registry::RegistryClient;
+use crate::types::Manifest;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedEnv {
@@ -100,7 +100,11 @@ fn unpack_tool_archive(bytes: &[u8], dest: &Path, url: &str) -> Result<()> {
 
     // Prefer content sniffing so authenticated/proxied URLs without file extensions still work.
     let is_gzip = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
-    let is_zstd = bytes.len() >= 4 && bytes[0] == 0x28 && bytes[1] == 0xB5 && bytes[2] == 0x2F && bytes[3] == 0xFD;
+    let is_zstd = bytes.len() >= 4
+        && bytes[0] == 0x28
+        && bytes[1] == 0xB5
+        && bytes[2] == 0x2F
+        && bytes[3] == 0xFD;
 
     if is_gzip || lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
         let gz = flate2::read::GzDecoder::new(bytes);
@@ -165,7 +169,10 @@ pub fn resolve_execution_env(
         if let Some(root) = tc.get("root").and_then(|v| v.as_str()) {
             let p = package_root.join(root);
             if p.exists() {
-                vars.insert("XSIL_TOOLCHAIN_ROOT".to_string(), p.to_string_lossy().to_string());
+                vars.insert(
+                    "XSIL_TOOLCHAIN_ROOT".to_string(),
+                    p.to_string_lossy().to_string(),
+                );
                 path_prefixes.push(p.join("bin"));
             }
         }
@@ -182,7 +189,10 @@ pub fn resolve_execution_env(
 
     if mode == "host-dependent" || mode.is_empty() {
         // No auto-resolution. Still allow execution.env expansion to use bundled paths.
-        return Ok(ResolvedEnv { vars, path_prefixes });
+        return Ok(ResolvedEnv {
+            vars,
+            path_prefixes,
+        });
     }
 
     if mode != "resolved" && mode != "bundled" {
@@ -191,7 +201,10 @@ pub fn resolve_execution_env(
 
     // Bundled means "no downloads", but still allow dependencies.tools to exist (ignored).
     if mode == "bundled" {
-        return Ok(ResolvedEnv { vars, path_prefixes });
+        return Ok(ResolvedEnv {
+            vars,
+            path_prefixes,
+        });
     }
 
     let tools = manifest
@@ -203,10 +216,16 @@ pub fn resolve_execution_env(
         .unwrap_or_default();
 
     if tools.is_empty() {
-        return Ok(ResolvedEnv { vars, path_prefixes });
+        return Ok(ResolvedEnv {
+            vars,
+            path_prefixes,
+        });
     }
 
-    let client = Client::builder().no_gzip().build().unwrap_or_else(|_| Client::new());
+    let client = Client::builder()
+        .no_gzip()
+        .build()
+        .unwrap_or_else(|_| Client::new());
     let resolved_urls: HashMap<String, String> = match (registry, manifest.dependencies.as_ref()) {
         (Some(reg), Some(deps)) => match reg.resolve_artifacts(deps) {
             Ok(m) => m,
@@ -227,7 +246,11 @@ pub fn resolve_execution_env(
 
     for t in tools {
         let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let version = t.get("version").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let version = t
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if name.is_empty() || version.is_empty() {
             bail!("Invalid tool dependency (name/version required)");
         }
@@ -243,7 +266,12 @@ pub fn resolve_execution_env(
         let art = platforms
             .get(&platform)
             .and_then(|v| v.as_object())
-            .with_context(|| format!("tool {}@{} has no artifact for platform {}", name, version, platform))?;
+            .with_context(|| {
+                format!(
+                    "tool {}@{} has no artifact for platform {}",
+                    name, version, platform
+                )
+            })?;
 
         let declared_url = art
             .get("url")
@@ -272,9 +300,19 @@ pub fn resolve_execution_env(
             .join(&sha);
 
         if dest.exists() {
-            println!("{} {}@{} found in cache", "✓".green(), name.bold(), version.cyan());
+            println!(
+                "{} {}@{} found in cache",
+                "✓".green(),
+                name.bold(),
+                version.cyan()
+            );
         } else {
-            println!("{} downloading {}@{}", "↓".blue(), name.bold(), version.cyan());
+            println!(
+                "{} downloading {}@{}",
+                "↓".blue(),
+                name.bold(),
+                version.cyan()
+            );
             let bytes = if let Some(reg) = registry {
                 reg.download_from_url(&url)?
             } else {
@@ -307,7 +345,8 @@ pub fn resolve_execution_env(
         // Root is the extracted directory. If it contains a single top-level folder, use it.
         let mut root = dest.clone();
         if let Ok(entries) = fs::read_dir(&dest) {
-            let mut names: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|x| x.path())).collect();
+            let mut names: Vec<PathBuf> =
+                entries.filter_map(|e| e.ok().map(|x| x.path())).collect();
             names.sort();
             if names.len() == 1 && names[0].is_dir() {
                 root = names[0].clone();
@@ -324,12 +363,18 @@ pub fn resolve_execution_env(
     if !vars.contains_key("XSIL_TOOLCHAIN_ROOT") {
         if let Some(k) = pick_toolchain_root_key(&tool_roots) {
             if let Some(p) = tool_roots.get(&k) {
-                vars.insert("XSIL_TOOLCHAIN_ROOT".to_string(), p.to_string_lossy().to_string());
+                vars.insert(
+                    "XSIL_TOOLCHAIN_ROOT".to_string(),
+                    p.to_string_lossy().to_string(),
+                );
             }
         }
     }
 
-    Ok(ResolvedEnv { vars, path_prefixes })
+    Ok(ResolvedEnv {
+        vars,
+        path_prefixes,
+    })
 }
 
 /// Expand `$VAR` / `${VAR}` occurrences in `value` using `vars`, and pass-through to process env as fallback.
@@ -346,4 +391,3 @@ pub fn expand_env(value: &str, vars: &HashMap<String, String>) -> String {
     }
     out
 }
-
