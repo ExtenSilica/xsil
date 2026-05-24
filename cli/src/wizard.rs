@@ -166,6 +166,27 @@ fn validate_isa(s: &str) -> Result<()> {
     Ok(())
 }
 
+/// Turn a free-text author name into a URL-safe GitHub owner segment for the
+/// *suggested* repository default (e.g. "Felipe Pedroni" -> "felipe-pedroni").
+/// The user can always overwrite the suggestion; this just keeps the default valid.
+fn github_owner_slug(author: &str) -> String {
+    let slug: String = author
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        "you".to_string()
+    } else {
+        slug
+    }
+}
+
 fn validate_http_url(field: &str, raw: &str) -> Result<()> {
     let t = raw.trim();
     if t.is_empty() {
@@ -176,6 +197,9 @@ fn validate_http_url(field: &str, raw: &str) -> Result<()> {
     }
     if !(t.starts_with("http://") || t.starts_with("https://")) {
         bail!("{field} must start with http:// or https://.");
+    }
+    if t.chars().any(char::is_whitespace) {
+        bail!("{field} must not contain spaces or other whitespace.");
     }
     Ok(())
 }
@@ -528,22 +552,24 @@ ELF="sim/bin/demo.elf"
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
+# Diagnostic chatter goes to stderr so stdout carries only the program output
+# — this is what tests/run.sh compares against tests/expected.txt.
 if [ ! -f "$ELF" ] && has riscv64-unknown-elf-gcc; then
-  printf "Assembling %s for RV64GC...\n" "$SRC"
+  printf "Assembling %s for RV64GC...\n" "$SRC" >&2
   mkdir -p sim/bin
   riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d -nostdlib -static -o "$ELF" "$SRC" || true
 fi
 
 if [ -f "$ELF" ] && has spike && has pk; then
-  printf "[ spike rv64gc ] %s\n\n" "$ELF"
+  printf "[ spike rv64gc ] %s\n\n" "$ELF" >&2
   spike pk "$ELF"
   exit $?
 fi
 
 # Fallback demo mode.
-printf "\n  %s — Demo Mode\n" "$(basename "$(pwd)")"
-printf "  ===================\n"
-printf "  No RISC-V toolchain or Spike found. Showing the expected output.\n\n"
+printf "\n  %s — Demo Mode\n" "$(basename "$(pwd)")" >&2
+printf "  ===================\n" >&2
+printf "  No RISC-V toolchain or Spike found. Showing the expected output.\n\n" >&2
 cat tests/expected.txt
 "#;
 
@@ -1264,11 +1290,8 @@ fn collect_interactively(args: &mut WizardArgs) -> Result<()> {
         args.license = Some(l);
     }
     if args.repository.is_none() || args.repository.as_deref().unwrap_or("").trim().is_empty() {
-        let suggested = format!(
-            "https://github.com/{}/{}",
-            args.author.as_deref().unwrap_or("you").trim(),
-            args.name,
-        );
+        let owner = github_owner_slug(args.author.as_deref().unwrap_or("you"));
+        let suggested = format!("https://github.com/{}/{}", owner, args.name);
         loop {
             let r = prompt_line("Repository URL (required)", Some(&suggested))?;
             match validate_http_url("repository", &r) {
@@ -1640,7 +1663,9 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{cmd_new, WizardArgs, WizardInstruction, WizardTargets};
+    use super::{
+        cmd_new, github_owner_slug, validate_http_url, WizardArgs, WizardInstruction, WizardTargets,
+    };
     use crate::manager::ExtensionManager;
 
     fn args_for(slug: &str, parent: &Path) -> WizardArgs {
@@ -1914,6 +1939,55 @@ mod tests {
         a.repository = None;
         let res = cmd_new(&mgr, a);
         assert!(res.is_err(), "expected cmd_new to fail without repository");
+    }
+
+    #[test]
+    fn validate_http_url_rejects_whitespace() {
+        // Regression: a default repo URL built from an author name with a space
+        // ("https://github.com/Felipe Pedroni/x") used to pass validation.
+        assert!(validate_http_url("repository", "https://github.com/Felipe Pedroni/x").is_err());
+        assert!(validate_http_url("repository", "https://github.com/ok/x").is_ok());
+    }
+
+    #[test]
+    fn github_owner_slug_normalizes_author() {
+        assert_eq!(github_owner_slug("Felipe Pedroni"), "felipe-pedroni");
+        assert_eq!(github_owner_slug("  Açaí  Dev  "), "a-a-dev");
+        assert_eq!(github_owner_slug(""), "you");
+        assert_eq!(github_owner_slug("---"), "you");
+        // A slug produced from any author must itself yield a valid URL.
+        let url = format!(
+            "https://github.com/{}/pkg",
+            github_owner_slug("Felipe Pedroni")
+        );
+        assert!(validate_http_url("repository", &url).is_ok());
+    }
+
+    #[test]
+    fn scaffolded_test_script_passes_in_demo_mode() {
+        // Regression: in demo mode (no toolchain/Spike) the banner used to print
+        // to stdout, so `xsil test .` always FAILED on a fresh package. The
+        // banner now goes to stderr; tests/run.sh must report PASS.
+        let tmp = tempfile::tempdir().unwrap();
+        let mgr = ExtensionManager::new(tmp.path().join("xsil-home"));
+        let parent = tmp.path().join("work");
+        fs::create_dir_all(&parent).unwrap();
+
+        let root = cmd_new(&mgr, args_for("demo-pass", &parent)).expect("cmd_new");
+
+        let out = std::process::Command::new("sh")
+            .arg("tests/run.sh")
+            .current_dir(&root)
+            .output()
+            .expect("run tests/run.sh");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("PASS"),
+            "expected PASS, got status={:?}\nstdout:\n{}\nstderr:\n{}",
+            out.status.code(),
+            stdout,
+            String::from_utf8_lossy(&out.stderr),
+        );
     }
 
     #[test]
