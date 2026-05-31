@@ -19,9 +19,7 @@ use colored::*;
 
 use crate::manager::ExtensionManager;
 use crate::registry::RegistryClient;
-use crate::types::{
-    Manifest, ManifestChecksums, OpcodeCheckRequest, OpcodeCheckResponse,
-};
+use crate::types::{Manifest, ManifestChecksums, OpcodeCheckRequest, OpcodeCheckResponse};
 
 // ── Reserved slugs / formats / standard-status values ────────────────────────
 
@@ -351,7 +349,11 @@ fn parse_opcode_strict(raw: Option<&str>) -> Option<u8> {
         "custom-3" | "custom3" => Some(0x7b),
         _ => {
             let n = parse_integer_like_strict(&t)?;
-            if n <= 0x7f { Some(n as u8) } else { None }
+            if n <= 0x7f {
+                Some(n as u8)
+            } else {
+                None
+            }
         }
     }
 }
@@ -363,7 +365,11 @@ fn parse_funct_strict(raw: Option<&str>, bits: u8) -> Option<u8> {
     }
     let n = parse_integer_like_strict(t)?;
     let max = (1u32 << bits) - 1;
-    if n <= max { Some(n as u8) } else { None }
+    if n <= max {
+        Some(n as u8)
+    } else {
+        None
+    }
 }
 
 fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequest> {
@@ -1465,11 +1471,27 @@ fn collect_interactively(args: &mut WizardArgs, registry: Option<&RegistryClient
                 let candidate_instruction = WizardInstruction {
                     mnemonic: mnemonic.clone(),
                     format,
-                    opcode: if opcode.is_empty() { None } else { Some(opcode) },
-                    funct3: if funct3.is_empty() { None } else { Some(funct3) },
-                    funct7: if funct7.is_empty() { None } else { Some(funct7) },
+                    opcode: if opcode.is_empty() {
+                        None
+                    } else {
+                        Some(opcode)
+                    },
+                    funct3: if funct3.is_empty() {
+                        None
+                    } else {
+                        Some(funct3)
+                    },
+                    funct7: if funct7.is_empty() {
+                        None
+                    } else {
+                        Some(funct7)
+                    },
                     operands,
-                    summary: if summary.is_empty() { None } else { Some(summary) },
+                    summary: if summary.is_empty() {
+                        None
+                    } else {
+                        Some(summary)
+                    },
                 };
 
                 if let Some(client) = registry {
@@ -1477,10 +1499,7 @@ fn collect_interactively(args: &mut WizardArgs, registry: Option<&RegistryClient
                         match client.check_opcode_collision(&check_body) {
                             Ok(resp) if resp.collides => {
                                 print_wizard_conflicts(&resp);
-                                if !prompt_yes_no(
-                                    "  Continue with this encoding anyway?",
-                                    false,
-                                )? {
+                                if !prompt_yes_no("  Continue with this encoding anyway?", false)? {
                                     continue 'enter_encoding;
                                 }
                             }

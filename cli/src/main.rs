@@ -1830,7 +1830,9 @@ mod tests {
         ];
         let lines = format_encoding_conflict_lines(&rows);
         assert!(lines[0].contains("Encoding conflicts"));
-        assert!(lines.iter().any(|l| l.contains("WARNING") && l.contains("overlaps with")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("WARNING") && l.contains("overlaps with")));
         assert!(lines
             .iter()
             .any(|l| l.contains("FATAL") && l.contains("incompatible with")));
