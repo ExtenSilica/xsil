@@ -9,7 +9,7 @@ use simplelog::*;
 use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 
 mod constants;
@@ -23,7 +23,7 @@ mod wizard;
 
 use manager::ExtensionManager;
 use registry::RegistryClient;
-use types::{Manifest, RegistryPackage, RegistryVersion};
+use types::{ExtensionConflict, Manifest, RegistryPackage, RegistryVersion};
 
 // ── CLI definition ────────────────────────────────────────────────────────────
 
@@ -42,6 +42,10 @@ struct Cli {
     /// Validate and pack without uploading or executing anything.
     #[arg(long, global = true)]
     dry_run: bool,
+
+    /// Disable ANSI color output.
+    #[arg(long, global = true)]
+    no_color: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -334,6 +338,8 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    let color_enabled = !cli.no_color && std::io::stdout().is_terminal();
+    colored::control::set_override(color_enabled);
     let (_config_file, _extensions_dir, root_dir) = setup_paths()?;
 
     let log_file = root_dir.join("logs").join("cli.log");
@@ -467,7 +473,7 @@ fn run() -> Result<()> {
                         llvm: *with_llvm,
                     },
                 };
-                let created = wizard::cmd_new(&manager, args)?;
+                let created = wizard::cmd_new(&manager, Some(&registry), args)?;
                 println!(
                     "{} Created wizard package at {}",
                     "✔".green(),
@@ -1333,6 +1339,43 @@ fn print_registry_version_repro_fields(v: &RegistryVersion) {
     }
 }
 
+fn print_encoding_conflicts(conflicts: &[ExtensionConflict]) {
+    for line in format_encoding_conflict_lines(conflicts) {
+        println!("{line}");
+    }
+}
+
+fn format_encoding_conflict_lines(conflicts: &[ExtensionConflict]) -> Vec<String> {
+    if conflicts.is_empty() {
+        return vec!["  Encoding conflicts: none known".to_string()];
+    }
+    let mut lines = vec!["  Encoding conflicts:".to_string()];
+    for c in conflicts {
+        let is_fatal = c.severity.eq_ignore_ascii_case("FATAL");
+        let marker = if is_fatal {
+            "✖".red().bold().to_string()
+        } else {
+            "⚠".yellow().bold().to_string()
+        };
+        let sev = if is_fatal {
+            "FATAL".red().bold().to_string()
+        } else {
+            "WARNING".yellow().bold().to_string()
+        };
+        let relation = if is_fatal {
+            "incompatible with"
+        } else {
+            "overlaps with"
+        };
+        lines.push(format!(
+            "    {}  {:<7}  {} {}",
+            marker, sev, relation, c.with_extension_name
+        ));
+        lines.push(format!("                 {}", c.detail));
+    }
+    lines
+}
+
 fn cmd_info(registry: &RegistryClient, manager: &ExtensionManager, package: &str) -> Result<()> {
     // Parse optional @version suffix (e.g. "rvx-demo@1.2.0" or "rvx-demo@latest").
     let (slug, requested_version) = parse_package_arg(package);
@@ -1365,6 +1408,11 @@ fn cmd_info(registry: &RegistryClient, manager: &ExtensionManager, package: &str
     println!("  Downloads   : {}", pkg.total_downloads);
     println!("  Weekly dl   : {}", pkg.weekly_downloads);
     println!("  Versions    : {}", pkg.versions.len());
+
+    match registry.get_package_conflicts(pkg.id) {
+        Ok(resp) => print_encoding_conflicts(&resp.conflicts),
+        Err(_) => println!("  Encoding conflicts: unavailable (could not reach registry)"),
+    }
 
     if let Some(ref latest) = pkg.latest_version {
         println!("  Latest      : {}", latest.cyan());
@@ -1749,4 +1797,42 @@ fn setup_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
     }
 
     Ok((config_file, extensions, root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_encoding_conflict_lines;
+    use crate::types::ExtensionConflict;
+
+    #[test]
+    fn info_conflicts_none_known() {
+        let lines = format_encoding_conflict_lines(&[]);
+        assert_eq!(lines, vec!["  Encoding conflicts: none known".to_string()]);
+    }
+
+    #[test]
+    fn info_conflicts_formats_warning_and_fatal() {
+        let rows = vec![
+            ExtensionConflict {
+                with_extension_id: "10".to_string(),
+                with_extension_name: "andes-xandes-dsp".to_string(),
+                conflict_type: "OPCODE".to_string(),
+                detail: "opcode 0x0B funct3 0x2 funct7 0x00".to_string(),
+                severity: "WARNING".to_string(),
+            },
+            ExtensionConflict {
+                with_extension_id: "11".to_string(),
+                with_extension_name: "riscv-zbkb".to_string(),
+                conflict_type: "OPCODE".to_string(),
+                detail: "opcode 0x13 funct3 0x1".to_string(),
+                severity: "FATAL".to_string(),
+            },
+        ];
+        let lines = format_encoding_conflict_lines(&rows);
+        assert!(lines[0].contains("Encoding conflicts"));
+        assert!(lines.iter().any(|l| l.contains("WARNING") && l.contains("overlaps with")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("FATAL") && l.contains("incompatible with")));
+    }
 }

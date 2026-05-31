@@ -263,6 +263,49 @@ pub struct ResolveArtifactsResponse {
     pub missing: Vec<MissingToolArtifact>,
 }
 
+// ── Encoding collision API (backend source of truth) ─────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ExtensionConflict {
+    #[serde(rename = "withExtensionId")]
+    pub with_extension_id: String,
+    #[serde(rename = "withExtensionName")]
+    pub with_extension_name: String,
+    #[serde(rename = "type")]
+    pub conflict_type: String,
+    pub detail: String,
+    pub severity: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PackageConflictsResponse {
+    #[serde(rename = "extensionId")]
+    pub extension_id: String,
+    #[serde(rename = "extensionName")]
+    pub extension_name: String,
+    pub conflicts: Vec<ExtensionConflict>,
+    #[serde(rename = "checkedAt")]
+    pub checked_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct OpcodeCheckRequest {
+    pub opcode: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub funct3: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub funct7: Option<u8>,
+    pub format: String,
+    #[serde(rename = "excludeExtensionId", skip_serializing_if = "Option::is_none")]
+    pub exclude_extension_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct OpcodeCheckResponse {
+    pub collides: bool,
+    pub conflicts: Vec<ExtensionConflict>,
+}
+
 // ── Implementation coordination (Phase C) ─────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]

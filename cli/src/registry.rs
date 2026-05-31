@@ -6,7 +6,8 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use crate::types::{
-    ApiTokenRow, ImplementationRequest, RegistryPackage, ResolveArtifactsResponse, UserProfile,
+    ApiTokenRow, ImplementationRequest, OpcodeCheckRequest, OpcodeCheckResponse,
+    PackageConflictsResponse, RegistryPackage, ResolveArtifactsResponse, UserProfile,
 };
 
 /// Best-effort local hostname, used as the default label when `xsil login`
@@ -615,6 +616,40 @@ impl RegistryClient {
         }
         let pkg: RegistryPackage = resp.json().context("Failed to parse package metadata")?;
         Ok(pkg)
+    }
+
+    /// Fetch backend-evaluated encoding conflicts for one extension id.
+    pub fn get_package_conflicts(&self, extension_id: u32) -> Result<PackageConflictsResponse> {
+        let url = format!("{}/api/package/{}/conflicts", self.base_url, extension_id);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .context("Failed to connect to registry conflict endpoint")?;
+        if !resp.status().is_success() {
+            bail!("Conflict endpoint error: {}", resp.status());
+        }
+        resp.json()
+            .context("Failed to parse conflict response from registry")
+    }
+
+    /// Check one candidate opcode tuple against current registry state.
+    pub fn check_opcode_collision(
+        &self,
+        request: &OpcodeCheckRequest,
+    ) -> Result<OpcodeCheckResponse> {
+        let url = format!("{}/api/opcodes/check", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(request)
+            .send()
+            .context("Failed to connect to registry opcode-check endpoint")?;
+        if !resp.status().is_success() {
+            bail!("Opcode-check endpoint error: {}", resp.status());
+        }
+        resp.json()
+            .context("Failed to parse opcode-check response from registry")
     }
 
     /// Call `PATCH /packages/:slug/versions/:version` to yank or restore a version.

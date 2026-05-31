@@ -15,9 +15,13 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use colored::*;
 
 use crate::manager::ExtensionManager;
-use crate::types::{Manifest, ManifestChecksums};
+use crate::registry::RegistryClient;
+use crate::types::{
+    Manifest, ManifestChecksums, OpcodeCheckRequest, OpcodeCheckResponse,
+};
 
 // ── Reserved slugs / formats / standard-status values ────────────────────────
 
@@ -316,6 +320,97 @@ fn parse_opcode(raw: Option<&str>) -> u8 {
         return t.parse::<u32>().map(|n| (n & 0x7f) as u8).unwrap_or(0x0b);
     }
     0x0b
+}
+
+fn parse_integer_like_strict(raw: &str) -> Option<u32> {
+    let t = raw.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(s) = t.strip_prefix("0x") {
+        return u32::from_str_radix(s, 16).ok();
+    }
+    if let Some(s) = t.strip_prefix("0b") {
+        return u32::from_str_radix(s, 2).ok();
+    }
+    if t.chars().all(|c| c.is_ascii_digit()) {
+        return t.parse::<u32>().ok();
+    }
+    None
+}
+
+fn parse_opcode_strict(raw: Option<&str>) -> Option<u8> {
+    let t = raw?.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        return None;
+    }
+    match t.as_str() {
+        "custom-0" | "custom0" => Some(0x0b),
+        "custom-1" | "custom1" => Some(0x2b),
+        "custom-2" | "custom2" => Some(0x5b),
+        "custom-3" | "custom3" => Some(0x7b),
+        _ => {
+            let n = parse_integer_like_strict(&t)?;
+            if n <= 0x7f { Some(n as u8) } else { None }
+        }
+    }
+}
+
+fn parse_funct_strict(raw: Option<&str>, bits: u8) -> Option<u8> {
+    let t = raw?.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let n = parse_integer_like_strict(t)?;
+    let max = (1u32 << bits) - 1;
+    if n <= max { Some(n as u8) } else { None }
+}
+
+fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequest> {
+    let opcode = parse_opcode_strict(ins.opcode.as_deref())?;
+    let format = ins.format.trim().to_uppercase();
+    let mut request = OpcodeCheckRequest {
+        opcode,
+        funct3: None,
+        funct7: None,
+        format: format.clone(),
+        exclude_extension_id: None,
+    };
+
+    if format != "U" && format != "J" {
+        request.funct3 = parse_funct_strict(ins.funct3.as_deref(), 3);
+    }
+    if format == "R" {
+        request.funct7 = parse_funct_strict(ins.funct7.as_deref(), 7);
+    }
+
+    Some(request)
+}
+
+fn print_wizard_conflicts(resp: &OpcodeCheckResponse) {
+    if !resp.collides || resp.conflicts.is_empty() {
+        return;
+    }
+    for c in &resp.conflicts {
+        let is_fatal = c.severity.eq_ignore_ascii_case("FATAL");
+        let marker = if is_fatal {
+            "✖".red().bold().to_string()
+        } else {
+            "⚠".yellow().bold().to_string()
+        };
+        let header = if is_fatal {
+            "This encoding is already claimed by"
+        } else {
+            "This encoding overlaps with"
+        };
+        let footer = if is_fatal {
+            "FATAL — cannot coexist in the same binary"
+        } else {
+            "WARNING — may be resolvable by remapping"
+        };
+        println!("\n{}  {}: {}", marker, header, c.with_extension_name.bold());
+        println!("   {} ({})", c.detail, footer);
+    }
 }
 
 /// Parse a funct3/funct7-style hint string to a numeric value. Defaults to 0.
@@ -1261,7 +1356,7 @@ sim/bin/
 
 // ── Interactive collection ────────────────────────────────────────────────────
 
-fn collect_interactively(args: &mut WizardArgs) -> Result<()> {
+fn collect_interactively(args: &mut WizardArgs, registry: Option<&RegistryClient>) -> Result<()> {
     println!("\n  ExtenSilica Extension Wizard");
     println!("  Press <Enter> to accept defaults shown in [brackets].\n");
 
@@ -1353,44 +1448,55 @@ fn collect_interactively(args: &mut WizardArgs) -> Result<()> {
             if mnemonic.is_empty() {
                 break;
             }
-            let format = prompt_line("  format [R/I/S/B/U/J]", Some("R"))?.to_uppercase();
-            validate_format(&format)?;
-            let opcode = prompt_line("  opcode (e.g. custom-0)", Some(""))?;
-            let funct3 = prompt_line("  funct3 (e.g. 0b000)", Some(""))?;
-            let funct7 = prompt_line("  funct7 (e.g. 0b0000000)", Some(""))?;
-            let operands_raw =
-                prompt_line("  operands (comma-separated, e.g. rd,rs1,rs2)", Some(""))?;
-            let summary = prompt_line("  summary (one line)", Some(""))?;
-            let operands = operands_raw
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>();
-            args.instructions.push(WizardInstruction {
-                mnemonic,
-                format,
-                opcode: if opcode.is_empty() {
-                    None
-                } else {
-                    Some(opcode)
-                },
-                funct3: if funct3.is_empty() {
-                    None
-                } else {
-                    Some(funct3)
-                },
-                funct7: if funct7.is_empty() {
-                    None
-                } else {
-                    Some(funct7)
-                },
-                operands,
-                summary: if summary.is_empty() {
-                    None
-                } else {
-                    Some(summary)
-                },
-            });
+            'enter_encoding: loop {
+                let format = prompt_line("  format [R/I/S/B/U/J]", Some("R"))?.to_uppercase();
+                validate_format(&format)?;
+                let opcode = prompt_line("  opcode (e.g. custom-0)", Some(""))?;
+                let funct3 = prompt_line("  funct3 (e.g. 0b000)", Some(""))?;
+                let funct7 = prompt_line("  funct7 (e.g. 0b0000000)", Some(""))?;
+                let operands_raw =
+                    prompt_line("  operands (comma-separated, e.g. rd,rs1,rs2)", Some(""))?;
+                let summary = prompt_line("  summary (one line)", Some(""))?;
+                let operands = operands_raw
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>();
+                let candidate_instruction = WizardInstruction {
+                    mnemonic: mnemonic.clone(),
+                    format,
+                    opcode: if opcode.is_empty() { None } else { Some(opcode) },
+                    funct3: if funct3.is_empty() { None } else { Some(funct3) },
+                    funct7: if funct7.is_empty() { None } else { Some(funct7) },
+                    operands,
+                    summary: if summary.is_empty() { None } else { Some(summary) },
+                };
+
+                if let Some(client) = registry {
+                    if let Some(check_body) = build_opcode_check_request(&candidate_instruction) {
+                        match client.check_opcode_collision(&check_body) {
+                            Ok(resp) if resp.collides => {
+                                print_wizard_conflicts(&resp);
+                                if !prompt_yes_no(
+                                    "  Continue with this encoding anyway?",
+                                    false,
+                                )? {
+                                    continue 'enter_encoding;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(_) => {
+                                println!(
+                                    "  (could not verify encoding against registry — skipping conflict check)"
+                                );
+                            }
+                        }
+                    }
+                }
+
+                args.instructions.push(candidate_instruction);
+                break 'enter_encoding;
+            }
             if !prompt_yes_no("Add another?", false)? {
                 break;
             }
@@ -1414,7 +1520,11 @@ fn collect_interactively(args: &mut WizardArgs) -> Result<()> {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Generate the wizard skeleton on disk under `parent/<name>/` and return its path.
-pub fn cmd_new(manager: &ExtensionManager, mut args: WizardArgs) -> Result<PathBuf> {
+pub fn cmd_new(
+    manager: &ExtensionManager,
+    registry: Option<&RegistryClient>,
+    mut args: WizardArgs,
+) -> Result<PathBuf> {
     validate_slug(&args.name)?;
 
     let base = args
@@ -1434,7 +1544,7 @@ pub fn cmd_new(manager: &ExtensionManager, mut args: WizardArgs) -> Result<PathB
     }
 
     if !args.non_interactive {
-        collect_interactively(&mut args)?;
+        collect_interactively(&mut args, registry)?;
     }
 
     // Defaults / final validation.
@@ -1664,7 +1774,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        cmd_new, github_owner_slug, validate_http_url, WizardArgs, WizardInstruction, WizardTargets,
+        build_opcode_check_request, cmd_new, github_owner_slug, validate_http_url, WizardArgs,
+        WizardInstruction, WizardTargets,
     };
     use crate::manager::ExtensionManager;
 
@@ -1706,7 +1817,7 @@ mod tests {
             operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
             summary: Some("rd = rs1 + rs2".into()),
         }];
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         for rel in [
             "manifest.json",
@@ -1770,7 +1881,7 @@ mod tests {
                 summary: None,
             },
         ];
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
         let header = fs::read_to_string(root.join("opcodes.h")).unwrap();
         assert!(
             header.contains("#define X_ALPHA(rd, rs1, rs2)"),
@@ -1800,7 +1911,7 @@ mod tests {
             operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
             summary: None,
         }];
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         let cpp =
             fs::read_to_string(root.join("sim/spike-extension/spike_ext_extension.cc")).unwrap();
@@ -1826,7 +1937,7 @@ mod tests {
         let mut a = args_for("mit-ext", &parent);
         a.license = Some("MIT".into());
         a.author = Some("Felipe Pedroni".into());
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         let lic = fs::read_to_string(root.join("LICENSE")).unwrap();
         assert!(
@@ -1866,7 +1977,7 @@ mod tests {
                 summary: None,
             },
         ];
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         let combined = fs::read_to_string(root.join("tests/instructions.S")).unwrap();
         assert!(combined.contains("# x.add (R-type)"));
@@ -1905,7 +2016,7 @@ mod tests {
             },
         ];
 
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
         let raw = fs::read_to_string(root.join("opcodes.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["schemaVersion"], 1);
@@ -1923,7 +2034,7 @@ mod tests {
         let parent = tmp.path().join("work");
         fs::create_dir_all(&parent).unwrap();
 
-        let res = cmd_new(&mgr, args_for("extensilica", &parent));
+        let res = cmd_new(&mgr, None, args_for("extensilica", &parent));
         assert!(res.is_err());
     }
 
@@ -1937,7 +2048,7 @@ mod tests {
 
         let mut a = args_for("wiz-no-repo", &parent);
         a.repository = None;
-        let res = cmd_new(&mgr, a);
+        let res = cmd_new(&mgr, None, a);
         assert!(res.is_err(), "expected cmd_new to fail without repository");
     }
 
@@ -1973,7 +2084,7 @@ mod tests {
         let parent = tmp.path().join("work");
         fs::create_dir_all(&parent).unwrap();
 
-        let root = cmd_new(&mgr, args_for("demo-pass", &parent)).expect("cmd_new");
+        let root = cmd_new(&mgr, None, args_for("demo-pass", &parent)).expect("cmd_new");
 
         let out = std::process::Command::new("sh")
             .arg("tests/run.sh")
@@ -2000,7 +2111,7 @@ mod tests {
 
         let mut a = args_for("wiz-bad-repo", &parent);
         a.repository = Some("ftp://example.com/repo".into());
-        let res = cmd_new(&mgr, a);
+        let res = cmd_new(&mgr, None, a);
         assert!(res.is_err(), "expected cmd_new to fail on non-http repo");
     }
 
@@ -2014,7 +2125,7 @@ mod tests {
 
         let mut a = args_for("wiz-with-repo", &parent);
         a.repository = Some("https://gitlab.com/me/wiz-with-repo".into());
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         let raw = fs::read_to_string(root.join("manifest.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -2031,7 +2142,7 @@ mod tests {
 
         let mut a = args_for("wiz-no-status", &parent);
         a.standard_status = None;
-        assert!(cmd_new(&mgr, a).is_err());
+        assert!(cmd_new(&mgr, None, a).is_err());
     }
 
     #[test]
@@ -2044,7 +2155,7 @@ mod tests {
 
         let mut a = args_for("wiz-bad-status", &parent);
         a.standard_status = Some("official".into());
-        assert!(cmd_new(&mgr, a).is_err());
+        assert!(cmd_new(&mgr, None, a).is_err());
     }
 
     #[test]
@@ -2057,7 +2168,7 @@ mod tests {
 
         let mut a = args_for("wiz-no-authority", &parent);
         a.authority = None;
-        assert!(cmd_new(&mgr, a).is_err());
+        assert!(cmd_new(&mgr, None, a).is_err());
     }
 
     #[test]
@@ -2071,7 +2182,7 @@ mod tests {
         let mut a = args_for("wiz-classed", &parent);
         a.standard_status = Some("ratified".into());
         a.authority = Some("RISC-V International".into());
-        let root = cmd_new(&mgr, a).expect("cmd_new");
+        let root = cmd_new(&mgr, None, a).expect("cmd_new");
 
         let raw = fs::read_to_string(root.join("manifest.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -2101,7 +2212,56 @@ mod tests {
             operands: vec![],
             summary: None,
         }];
-        let res = cmd_new(&mgr, a);
+        let res = cmd_new(&mgr, None, a);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn builds_opcode_candidate_for_r_type() {
+        let ins = WizardInstruction {
+            mnemonic: "x.add".into(),
+            format: "R".into(),
+            opcode: Some("custom-0".into()),
+            funct3: Some("0b001".into()),
+            funct7: Some("0x00".into()),
+            operands: vec![],
+            summary: None,
+        };
+        let req = build_opcode_check_request(&ins).expect("candidate");
+        assert_eq!(req.opcode, 0x0b);
+        assert_eq!(req.funct3, Some(1));
+        assert_eq!(req.funct7, Some(0));
+        assert_eq!(req.format, "R");
+    }
+
+    #[test]
+    fn builds_opcode_candidate_without_funct_for_u_type() {
+        let ins = WizardInstruction {
+            mnemonic: "x.u".into(),
+            format: "U".into(),
+            opcode: Some("0x5b".into()),
+            funct3: Some("0b101".into()),
+            funct7: Some("0b1111111".into()),
+            operands: vec![],
+            summary: None,
+        };
+        let req = build_opcode_check_request(&ins).expect("candidate");
+        assert_eq!(req.opcode, 0x5b);
+        assert_eq!(req.funct3, None);
+        assert_eq!(req.funct7, None);
+    }
+
+    #[test]
+    fn invalid_opcode_skips_registry_check_candidate() {
+        let ins = WizardInstruction {
+            mnemonic: "x.bad".into(),
+            format: "R".into(),
+            opcode: Some("not-an-opcode".into()),
+            funct3: Some("0b001".into()),
+            funct7: Some("0b0000000".into()),
+            operands: vec![],
+            summary: None,
+        };
+        assert!(build_opcode_check_request(&ins).is_none());
     }
 }
