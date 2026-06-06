@@ -79,7 +79,7 @@ const RESERVED_SLUGS: &[&str] = &[
     "v3",
 ];
 
-const VALID_FORMATS: &[&str] = &["R", "I", "S", "B", "U", "J"];
+const VALID_FORMATS: &[&str] = &["R", "I", "S", "B", "U", "J", "I-SINGLETON"];
 
 #[derive(Clone, Debug)]
 pub struct WizardInstruction {
@@ -88,8 +88,16 @@ pub struct WizardInstruction {
     pub opcode: Option<String>,
     pub funct3: Option<String>,
     pub funct7: Option<String>,
+    /// 12-bit I-immediate for I-singleton encodings (brev8/rev8/zip/unzip etc.).
+    /// Accepts numeric strings ("0x687", "0b...", "1671") or `None` for non-I-singleton.
+    pub funct12: Option<String>,
     pub operands: Vec<String>,
     pub summary: Option<String>,
+}
+
+fn is_i_singleton(format: &str) -> bool {
+    let f = format.trim().to_uppercase();
+    f == "I-SINGLETON" || f == "ISINGLETON" || f == "I_SINGLETON"
 }
 
 #[derive(Clone, Debug, Default)]
@@ -372,6 +380,20 @@ fn parse_funct_strict(raw: Option<&str>, bits: u8) -> Option<u8> {
     }
 }
 
+/// Parse a 12-bit I-immediate (0..0xFFF) used by I-singleton encodings.
+fn parse_imm12_strict(raw: Option<&str>) -> Option<u16> {
+    let t = raw?.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let n = parse_integer_like_strict(t)?;
+    if n <= 0x0fff {
+        Some(n as u16)
+    } else {
+        None
+    }
+}
+
 fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequest> {
     let opcode = parse_opcode_strict(ins.opcode.as_deref())?;
     let format = ins.format.trim().to_uppercase();
@@ -379,6 +401,7 @@ fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequ
         opcode,
         funct3: None,
         funct7: None,
+        funct12: None,
         format: format.clone(),
         exclude_extension_id: None,
     };
@@ -386,7 +409,9 @@ fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequ
     if format != "U" && format != "J" {
         request.funct3 = parse_funct_strict(ins.funct3.as_deref(), 3);
     }
-    if format == "R" {
+    if is_i_singleton(&format) {
+        request.funct12 = parse_imm12_strict(ins.funct12.as_deref());
+    } else if format == "R" {
         request.funct7 = parse_funct_strict(ins.funct7.as_deref(), 7);
     }
 
@@ -1455,11 +1480,19 @@ fn collect_interactively(args: &mut WizardArgs, registry: Option<&RegistryClient
                 break;
             }
             'enter_encoding: loop {
-                let format = prompt_line("  format [R/I/S/B/U/J]", Some("R"))?.to_uppercase();
+                let format =
+                    prompt_line("  format [R/I/S/B/U/J/I-SINGLETON]", Some("R"))?.to_uppercase();
                 validate_format(&format)?;
                 let opcode = prompt_line("  opcode (e.g. custom-0)", Some(""))?;
                 let funct3 = prompt_line("  funct3 (e.g. 0b000)", Some(""))?;
-                let funct7 = prompt_line("  funct7 (e.g. 0b0000000)", Some(""))?;
+                // I-singleton uses a 12-bit immediate (rs2 is part of imm) instead of funct7.
+                let (funct7, funct12) = if is_i_singleton(&format) {
+                    let imm12 = prompt_line("  imm12 (e.g. 0x687)", Some(""))?;
+                    (String::new(), imm12)
+                } else {
+                    let f7 = prompt_line("  funct7 (e.g. 0b0000000)", Some(""))?;
+                    (f7, String::new())
+                };
                 let operands_raw =
                     prompt_line("  operands (comma-separated, e.g. rd,rs1,rs2)", Some(""))?;
                 let summary = prompt_line("  summary (one line)", Some(""))?;
@@ -1485,6 +1518,11 @@ fn collect_interactively(args: &mut WizardArgs, registry: Option<&RegistryClient
                         None
                     } else {
                         Some(funct7)
+                    },
+                    funct12: if funct12.is_empty() {
+                        None
+                    } else {
+                        Some(funct12)
                     },
                     operands,
                     summary: if summary.is_empty() {
@@ -1797,6 +1835,7 @@ mod tests {
         WizardInstruction, WizardTargets,
     };
     use crate::manager::ExtensionManager;
+    use crate::types::OpcodeCheckRequest;
 
     fn args_for(slug: &str, parent: &Path) -> WizardArgs {
         WizardArgs {
@@ -1833,6 +1872,7 @@ mod tests {
             opcode: Some("custom-0".into()),
             funct3: Some("0b000".into()),
             funct7: Some("0b0000000".into()),
+            funct12: None,
             operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
             summary: Some("rd = rs1 + rs2".into()),
         }];
@@ -1887,6 +1927,7 @@ mod tests {
                 opcode: Some("custom-0".into()),
                 funct3: Some("0b001".into()),
                 funct7: Some("0b0000010".into()),
+                funct12: None,
                 operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
                 summary: None,
             },
@@ -1896,6 +1937,7 @@ mod tests {
                 opcode: Some("custom-1".into()),
                 funct3: Some("0b010".into()),
                 funct7: None,
+                funct12: None,
                 operands: vec!["rd".into(), "rs1".into(), "imm".into()],
                 summary: None,
             },
@@ -1927,6 +1969,7 @@ mod tests {
             opcode: Some("custom-0".into()),
             funct3: Some("0b000".into()),
             funct7: Some("0b0000000".into()),
+            funct12: None,
             operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
             summary: None,
         }];
@@ -1983,6 +2026,7 @@ mod tests {
                 opcode: Some("custom-0".into()),
                 funct3: Some("0b000".into()),
                 funct7: Some("0b0000000".into()),
+                funct12: None,
                 operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
                 summary: None,
             },
@@ -1992,6 +2036,7 @@ mod tests {
                 opcode: Some("custom-1".into()),
                 funct3: Some("0b010".into()),
                 funct7: None,
+                funct12: None,
                 operands: vec!["rd".into(), "rs1".into(), "imm".into()],
                 summary: None,
             },
@@ -2021,6 +2066,7 @@ mod tests {
                 opcode: Some("custom-0".into()),
                 funct3: Some("0b000".into()),
                 funct7: None,
+                funct12: None,
                 operands: vec!["rd".into(), "rs1".into(), "imm".into()],
                 summary: Some("alpha summary".into()),
             },
@@ -2030,6 +2076,7 @@ mod tests {
                 opcode: None,
                 funct3: None,
                 funct7: None,
+                funct12: None,
                 operands: vec![],
                 summary: None,
             },
@@ -2228,6 +2275,7 @@ mod tests {
             opcode: None,
             funct3: None,
             funct7: None,
+            funct12: None,
             operands: vec![],
             summary: None,
         }];
@@ -2243,6 +2291,7 @@ mod tests {
             opcode: Some("custom-0".into()),
             funct3: Some("0b001".into()),
             funct7: Some("0x00".into()),
+            funct12: None,
             operands: vec![],
             summary: None,
         };
@@ -2254,6 +2303,53 @@ mod tests {
     }
 
     #[test]
+    fn builds_opcode_candidate_with_funct12_for_i_singleton() {
+        // I-singleton (brev8/rev8/zip/unzip) should put the 12-bit imm in funct12
+        // and leave funct7 cleared, so the registry can distinguish them from
+        // other instructions sharing (opcode, funct3) — the fix for the false
+        // FATAL between riscv-zbkb and the zk* extensions.
+        let ins = WizardInstruction {
+            mnemonic: "brev8".into(),
+            format: "I-SINGLETON".into(),
+            opcode: Some("0x13".into()),
+            funct3: Some("0b101".into()),
+            funct7: None,
+            funct12: Some("0x687".into()),
+            operands: vec!["rd".into(), "rs1".into()],
+            summary: None,
+        };
+        let req = build_opcode_check_request(&ins).expect("candidate");
+        assert_eq!(req.opcode, 0x13);
+        assert_eq!(req.funct3, Some(0b101));
+        assert_eq!(req.funct7, None);
+        assert_eq!(req.funct12, Some(0x687));
+        assert_eq!(req.format, "I-SINGLETON");
+    }
+
+    #[test]
+    fn opcode_check_request_serializes_funct12_when_set() {
+        // Wire-format guarantee: the backend reads funct12 from the JSON body,
+        // so it must be emitted by serde with the unrenamed key.
+        let req = OpcodeCheckRequest {
+            opcode: 0x13,
+            funct3: Some(0b101),
+            funct7: None,
+            funct12: Some(0x687),
+            format: "I-SINGLETON".into(),
+            exclude_extension_id: None,
+        };
+        let json = serde_json::to_string(&req).expect("serialize");
+        assert!(
+            json.contains("\"funct12\":1671"),
+            "missing funct12 in {json}"
+        );
+        assert!(
+            !json.contains("\"funct7\""),
+            "funct7 should be omitted when None: {json}"
+        );
+    }
+
+    #[test]
     fn builds_opcode_candidate_without_funct_for_u_type() {
         let ins = WizardInstruction {
             mnemonic: "x.u".into(),
@@ -2261,6 +2357,7 @@ mod tests {
             opcode: Some("0x5b".into()),
             funct3: Some("0b101".into()),
             funct7: Some("0b1111111".into()),
+            funct12: None,
             operands: vec![],
             summary: None,
         };
@@ -2278,6 +2375,7 @@ mod tests {
             opcode: Some("not-an-opcode".into()),
             funct3: Some("0b001".into()),
             funct7: Some("0b0000000".into()),
+            funct12: None,
             operands: vec![],
             summary: None,
         };

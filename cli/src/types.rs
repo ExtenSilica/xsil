@@ -295,6 +295,11 @@ pub struct OpcodeCheckRequest {
     pub funct3: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub funct7: Option<u8>,
+    /// 12-bit I-immediate for I-singleton encodings (brev8/rev8/zip/unzip and
+    /// scalar-crypto fixed-imm instructions). Mutually exclusive with funct7
+    /// in practice: R-type uses funct7, I-singleton uses funct12.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub funct12: Option<u16>,
     pub format: String,
     #[serde(rename = "excludeExtensionId", skip_serializing_if = "Option::is_none")]
     pub exclude_extension_id: Option<String>,
