@@ -301,6 +301,13 @@ pub struct OpcodeCheckRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub funct12: Option<u16>,
     pub format: String,
+    /// Candidate mnemonic. Backend uses it to distinguish a designed overlap
+    /// (same encoding + same mnemonic = same instruction by spec, e.g. Zbkb
+    /// `rol` overlapping Zbb `rol`) from a real opcode conflict (different
+    /// instructions at the same slot). Omitted from the wire when None so
+    /// older backends fall back to the legacy classification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mnemonic: Option<String>,
     #[serde(rename = "excludeExtensionId", skip_serializing_if = "Option::is_none")]
     pub exclude_extension_id: Option<String>,
 }

@@ -397,12 +397,21 @@ fn parse_imm12_strict(raw: Option<&str>) -> Option<u16> {
 fn build_opcode_check_request(ins: &WizardInstruction) -> Option<OpcodeCheckRequest> {
     let opcode = parse_opcode_strict(ins.opcode.as_deref())?;
     let format = ins.format.trim().to_uppercase();
+    let mnemonic = {
+        let m = ins.mnemonic.trim();
+        if m.is_empty() {
+            None
+        } else {
+            Some(m.to_string())
+        }
+    };
     let mut request = OpcodeCheckRequest {
         opcode,
         funct3: None,
         funct7: None,
         funct12: None,
         format: format.clone(),
+        mnemonic,
         exclude_extension_id: None,
     };
 
@@ -2327,6 +2336,30 @@ mod tests {
     }
 
     #[test]
+    fn build_opcode_check_request_propagates_mnemonic() {
+        // Backend uses mnemonic to classify designed overlap (e.g. publishing
+        // Zbkb's `rol` while Zbb's `rol` already exists) as OPCODE_SHARED
+        // instead of FATAL. The wizard must forward the user's mnemonic.
+        let ins = WizardInstruction {
+            mnemonic: "rol".into(),
+            format: "R".into(),
+            opcode: Some("0x33".into()),
+            funct3: Some("0b001".into()),
+            funct7: Some("0b0110000".into()),
+            funct12: None,
+            operands: vec!["rd".into(), "rs1".into(), "rs2".into()],
+            summary: None,
+        };
+        let req = build_opcode_check_request(&ins).expect("candidate");
+        assert_eq!(req.mnemonic.as_deref(), Some("rol"));
+        let json = serde_json::to_string(&req).expect("serialize");
+        assert!(
+            json.contains("\"mnemonic\":\"rol\""),
+            "missing mnemonic in {json}"
+        );
+    }
+
+    #[test]
     fn opcode_check_request_serializes_funct12_when_set() {
         // Wire-format guarantee: the backend reads funct12 from the JSON body,
         // so it must be emitted by serde with the unrenamed key.
@@ -2336,6 +2369,7 @@ mod tests {
             funct7: None,
             funct12: Some(0x687),
             format: "I-SINGLETON".into(),
+            mnemonic: None,
             exclude_extension_id: None,
         };
         let json = serde_json::to_string(&req).expect("serialize");
