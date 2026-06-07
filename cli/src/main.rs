@@ -1351,25 +1351,35 @@ fn format_encoding_conflict_lines(conflicts: &[ExtensionConflict]) -> Vec<String
     }
     let mut lines = vec!["  Encoding conflicts:".to_string()];
     for c in conflicts {
-        let is_fatal = c.severity.eq_ignore_ascii_case("FATAL");
-        let marker = if is_fatal {
-            "✖".red().bold().to_string()
+        // Classify: SHARED (designed overlap, same instruction by spec) takes
+        // priority over severity. Then FATAL > WARNING by severity.
+        let is_shared = c.conflict_type.eq_ignore_ascii_case("OPCODE_SHARED")
+            || c.conflict_type.eq_ignore_ascii_case("SHARED");
+        let is_fatal = !is_shared && c.severity.eq_ignore_ascii_case("FATAL");
+
+        let (marker, label, relation) = if is_shared {
+            (
+                "ℹ".cyan().bold().to_string(),
+                "SHARED".cyan().bold().to_string(),
+                "shares instruction with",
+            )
+        } else if is_fatal {
+            (
+                "✖".red().bold().to_string(),
+                "FATAL".red().bold().to_string(),
+                "incompatible with",
+            )
         } else {
-            "⚠".yellow().bold().to_string()
+            (
+                "⚠".yellow().bold().to_string(),
+                "WARNING".yellow().bold().to_string(),
+                "overlaps with",
+            )
         };
-        let sev = if is_fatal {
-            "FATAL".red().bold().to_string()
-        } else {
-            "WARNING".yellow().bold().to_string()
-        };
-        let relation = if is_fatal {
-            "incompatible with"
-        } else {
-            "overlaps with"
-        };
+
         lines.push(format!(
             "    {}  {:<7}  {} {}",
-            marker, sev, relation, c.with_extension_name
+            marker, label, relation, c.with_extension_name
         ));
         lines.push(format!("                 {}", c.detail));
     }
@@ -1836,5 +1846,37 @@ mod tests {
         assert!(lines
             .iter()
             .any(|l| l.contains("FATAL") && l.contains("incompatible with")));
+    }
+
+    #[test]
+    fn info_conflicts_renders_shared_as_info_not_warning() {
+        // OPCODE_SHARED is a designed overlap (e.g. Zbkb's `rol` and Zbb's `rol`
+        // are the same instruction by spec). It must surface with the SHARED
+        // label + "shares instruction with" phrasing, NOT as FATAL or WARNING,
+        // regardless of severity carried on the wire.
+        let rows = vec![ExtensionConflict {
+            with_extension_id: "12".to_string(),
+            with_extension_name: "riscv-zbb".to_string(),
+            conflict_type: "OPCODE_SHARED".to_string(),
+            detail: "rol shared at opcode 0x33 funct3 0x1 funct7 0x30 (same instruction by spec)"
+                .to_string(),
+            severity: "WARNING".to_string(),
+        }];
+        let lines = format_encoding_conflict_lines(&rows);
+        assert!(lines[0].contains("Encoding conflicts"));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("SHARED") && l.contains("shares instruction with")),
+            "missing SHARED row: {lines:?}"
+        );
+        // And it must NOT be classified as FATAL/WARNING in the visible label.
+        assert!(
+            !lines
+                .iter()
+                .any(|l| (l.contains("FATAL") || l.contains("WARNING"))
+                    && l.contains("incompatible with")),
+            "shared overlap leaked into FATAL/WARNING bucket: {lines:?}"
+        );
     }
 }
