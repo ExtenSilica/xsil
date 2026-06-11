@@ -1351,13 +1351,28 @@ fn format_encoding_conflict_lines(conflicts: &[ExtensionConflict]) -> Vec<String
     }
     let mut lines = vec!["  Encoding conflicts:".to_string()];
     for c in conflicts {
-        // Classify: SHARED (designed overlap, same instruction by spec) takes
-        // priority over severity. Then FATAL > WARNING by severity.
-        let is_shared = c.conflict_type.eq_ignore_ascii_case("OPCODE_SHARED")
-            || c.conflict_type.eq_ignore_ascii_case("SHARED");
-        let is_fatal = !is_shared && c.severity.eq_ignore_ascii_case("FATAL");
+        // Classify, in order of precedence:
+        //   - SHARED_MAJOR_OPCODE: only the 7-bit major opcode matches (sub-fields
+        //     null on both sides). Informational — NOT a conflict. Common for the
+        //     RVV vector ISA where every instruction lives under OP-V 0x57 and is
+        //     disambiguated by funct3/funct6, register fields, etc.
+        //   - OPCODE_SHARED / SHARED: same encoding + same mnemonic, a designed
+        //     overlap (e.g. Zbkb's `rol` and Zbb's `rol`). Informational.
+        //   - FATAL: full encoding match with different mnemonic.
+        //   - WARNING: collision with at least one side remappable.
+        let is_shared_major = c.conflict_type.eq_ignore_ascii_case("SHARED_MAJOR_OPCODE");
+        let is_shared = !is_shared_major
+            && (c.conflict_type.eq_ignore_ascii_case("OPCODE_SHARED")
+                || c.conflict_type.eq_ignore_ascii_case("SHARED"));
+        let is_fatal = !is_shared_major && !is_shared && c.severity.eq_ignore_ascii_case("FATAL");
 
-        let (marker, label, relation) = if is_shared {
+        let (marker, label, relation) = if is_shared_major {
+            (
+                "ℹ".blue().bold().to_string(),
+                "INFO".blue().bold().to_string(),
+                "shares major opcode with",
+            )
+        } else if is_shared {
             (
                 "ℹ".cyan().bold().to_string(),
                 "SHARED".cyan().bold().to_string(),
@@ -1877,6 +1892,38 @@ mod tests {
                 .any(|l| (l.contains("FATAL") || l.contains("WARNING"))
                     && l.contains("incompatible with")),
             "shared overlap leaked into FATAL/WARNING bucket: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn info_conflicts_renders_shared_major_opcode_as_info_not_fatal() {
+        // SHARED_MAJOR_OPCODE = both extensions sit under the same 7-bit major
+        // opcode (e.g. OP-V 0x57 for vector instructions, OP-IMM 0x13 for shift/
+        // immediate). NOT a hardware conflict — disambiguated at the next decode
+        // level (funct3/funct6/funct7, register fields). Must surface as INFO,
+        // with the "shares major opcode with" phrasing, never as FATAL.
+        let rows = vec![ExtensionConflict {
+            with_extension_id: "18".to_string(),
+            with_extension_name: "riscv-zvbc".to_string(),
+            conflict_type: "SHARED_MAJOR_OPCODE".to_string(),
+            detail: "opcode 0x57 funct3 null funct7 null — shared major opcode only; \
+                     disambiguated at the next decode level (funct3/funct6/funct7)."
+                .to_string(),
+            severity: "INFO".to_string(),
+        }];
+        let lines = format_encoding_conflict_lines(&rows);
+        assert!(lines[0].contains("Encoding conflicts"));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("INFO") && l.contains("shares major opcode with")),
+            "missing SHARED_MAJOR_OPCODE row: {lines:?}"
+        );
+        // Critically, the row must NOT carry the FATAL "incompatible with" wording
+        // — that was the bug behind the brucehoult r/RISCV complaint.
+        assert!(
+            !lines.iter().any(|l| l.contains("incompatible with")),
+            "shared major opcode leaked into FATAL bucket: {lines:?}"
         );
     }
 }
