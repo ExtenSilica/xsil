@@ -1349,51 +1349,67 @@ fn format_encoding_conflict_lines(conflicts: &[ExtensionConflict]) -> Vec<String
     if conflicts.is_empty() {
         return vec!["  Encoding conflicts: none known".to_string()];
     }
-    let mut lines = vec!["  Encoding conflicts:".to_string()];
-    for c in conflicts {
-        // Classify, in order of precedence:
-        //   - SHARED_MAJOR_OPCODE: only the 7-bit major opcode matches (sub-fields
-        //     null on both sides). Informational — NOT a conflict. Common for the
-        //     RVV vector ISA where every instruction lives under OP-V 0x57 and is
-        //     disambiguated by funct3/funct6, register fields, etc.
-        //   - OPCODE_SHARED / SHARED: same encoding + same mnemonic, a designed
-        //     overlap (e.g. Zbkb's `rol` and Zbb's `rol`). Informational.
-        //   - FATAL: full encoding match with different mnemonic.
-        //   - WARNING: collision with at least one side remappable.
-        let is_shared_major = c.conflict_type.eq_ignore_ascii_case("SHARED_MAJOR_OPCODE");
-        let is_shared = !is_shared_major
-            && (c.conflict_type.eq_ignore_ascii_case("OPCODE_SHARED")
-                || c.conflict_type.eq_ignore_ascii_case("SHARED"));
-        let is_fatal = !is_shared_major && !is_shared && c.severity.eq_ignore_ascii_case("FATAL");
+    // Split into real conflicts vs. overlap/shared-space metadata so the
+    // header doesn't call informational overlaps "conflicts" (the over-report
+    // the RVV/custom-space rework fixed on the backend).
+    let is_conflict =
+        |c: &ExtensionConflict| matches!(c.conflict_type.to_uppercase().as_str(), "OPCODE" | "CSR");
+    let conflict_count = conflicts.iter().filter(|c| is_conflict(c)).count();
 
-        let (marker, label, relation) = if is_shared_major {
-            (
+    let header = if conflict_count == 0 {
+        "  Encoding conflicts: none — only shared-space / overlap notes below".to_string()
+    } else {
+        format!(
+            "  Encoding conflicts: {} confirmed",
+            conflict_count.to_string().red().bold()
+        )
+    };
+    let mut lines = vec![header];
+
+    for c in conflicts {
+        // One row style per classification. Only OPCODE / CSR are real conflicts;
+        // the rest are informational overlap / shared-space metadata.
+        let (marker, label, relation) = match c.conflict_type.to_uppercase().as_str() {
+            "OPCODE" | "CSR" => {
+                if c.severity.eq_ignore_ascii_case("FATAL") {
+                    (
+                        "✖".red().bold().to_string(),
+                        "FATAL".red().bold().to_string(),
+                        "incompatible with",
+                    )
+                } else {
+                    (
+                        "✖".red().bold().to_string(),
+                        "CONFLICT".red().bold().to_string(),
+                        "conflicts with",
+                    )
+                }
+            }
+            "PARTIAL_DECODE_OVERLAP" => (
+                "⚠".yellow().bold().to_string(),
+                "MAYBE".yellow().bold().to_string(),
+                "may overlap with",
+            ),
+            "SHARED_MAJOR_OPCODE" => (
                 "ℹ".blue().bold().to_string(),
                 "INFO".blue().bold().to_string(),
                 "shares major opcode with",
-            )
-        } else if is_shared {
-            (
+            ),
+            "SHARED_CUSTOM_SPACE" | "CUSTOM_SPACE" => (
+                "ℹ".blue().bold().to_string(),
+                "INFO".blue().bold().to_string(),
+                "shares custom space with",
+            ),
+            // OPCODE_SHARED / SHARED — designed overlap, same instruction by spec.
+            _ => (
                 "ℹ".cyan().bold().to_string(),
                 "SHARED".cyan().bold().to_string(),
                 "shares instruction with",
-            )
-        } else if is_fatal {
-            (
-                "✖".red().bold().to_string(),
-                "FATAL".red().bold().to_string(),
-                "incompatible with",
-            )
-        } else {
-            (
-                "⚠".yellow().bold().to_string(),
-                "WARNING".yellow().bold().to_string(),
-                "overlaps with",
-            )
+            ),
         };
 
         lines.push(format!(
-            "    {}  {:<7}  {} {}",
+            "    {}  {:<8}  {} {}",
             marker, label, relation, c.with_extension_name
         ));
         lines.push(format!("                 {}", c.detail));
@@ -1836,7 +1852,9 @@ mod tests {
     }
 
     #[test]
-    fn info_conflicts_formats_warning_and_fatal() {
+    fn info_conflicts_real_opcode_counts_as_confirmed() {
+        // OPCODE (full decode) is a real conflict. Non-FATAL renders as CONFLICT,
+        // FATAL renders as FATAL. Both count toward the "N confirmed" header.
         let rows = vec![
             ExtensionConflict {
                 with_extension_id: "10".to_string(),
@@ -1854,13 +1872,50 @@ mod tests {
             },
         ];
         let lines = format_encoding_conflict_lines(&rows);
-        assert!(lines[0].contains("Encoding conflicts"));
+        assert!(lines[0].contains("2 confirmed"), "header: {:?}", lines[0]);
         assert!(lines
             .iter()
-            .any(|l| l.contains("WARNING") && l.contains("overlaps with")));
+            .any(|l| l.contains("CONFLICT") && l.contains("conflicts with")));
         assert!(lines
             .iter()
             .any(|l| l.contains("FATAL") && l.contains("incompatible with")));
+    }
+
+    #[test]
+    fn info_conflicts_shared_space_and_partial_are_not_confirmed() {
+        // SHARED_CUSTOM_SPACE + PARTIAL_DECODE_OVERLAP must not be counted as
+        // conflicts; the header should say "none — only shared-space / overlap".
+        let rows = vec![
+            ExtensionConflict {
+                with_extension_id: "12".to_string(),
+                with_extension_name: "xthead-bb".to_string(),
+                conflict_type: "SHARED_CUSTOM_SPACE".to_string(),
+                detail: "both declare custom-0; shared custom space".to_string(),
+                severity: "INFO".to_string(),
+            },
+            ExtensionConflict {
+                with_extension_id: "13".to_string(),
+                with_extension_name: "mojo-v".to_string(),
+                conflict_type: "PARTIAL_DECODE_OVERLAP".to_string(),
+                detail: "opcode 0x0B funct3 0x1 funct7 null — full mask isn't known".to_string(),
+                severity: "WARNING".to_string(),
+            },
+        ];
+        let lines = format_encoding_conflict_lines(&rows);
+        assert!(
+            lines[0].contains("none") && lines[0].contains("shared-space"),
+            "header: {:?}",
+            lines[0]
+        );
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("INFO") && l.contains("shares custom space with")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("MAYBE") && l.contains("may overlap with")));
+        // No "confirmed" wording and no FATAL/CONFLICT labels.
+        assert!(!lines.iter().any(|l| l.contains("confirmed")));
+        assert!(!lines.iter().any(|l| l.contains("conflicts with")));
     }
 
     #[test]
